@@ -1,13 +1,18 @@
-"""Stage 5: collision mesh from depth rendered by the trained splat (TSDF fusion)."""
+"""Stage 6: collision mesh from depth rendered by the trained splat (TSDF fusion).
+
+The mesh carries vertex colours taken from the splat, so the game can also show it
+behind the splat: gaps then show a plain surface instead of the background.
+"""
 from __future__ import annotations
 
 import json
+import math
 
 import numpy as np
 
 from ..config import Config
 from ..workspace import Workspace
-from . import splat
+from . import clean, splat
 
 
 FLOOR_BIN = 0.02              # metres
@@ -80,7 +85,7 @@ def run(ws: Workspace, cfg: Config) -> None:
     c = cfg.collision
     device = splat._require_cuda()
     scene = splat.load_scene(ws)
-    params = splat.load_params(ws, device)
+    params = clean.load_params(ws, device)
 
     # A cube around the scene. (Open3D 0.20's ScalableTSDFVolume returned empty
     # meshes on this setup, so the uniform volume is used.)
@@ -107,16 +112,18 @@ def run(ws: Workspace, cfg: Config) -> None:
             K = scene["K"][i].copy()
             K[:2] /= c.downscale
             c2w = torch.tensor(scene["c2w"][i], dtype=torch.float32, device=device)
-            depth, alpha, _ = splat.render(
+            sh_degree = int(round(math.sqrt(params["shN"].shape[1] + 1))) - 1
+            out, alpha, _ = splat.render(
                 params, c2w, torch.tensor(K, dtype=torch.float32, device=device),
-                w, h, sh_degree=0, mode="ED")
-            depth = depth[..., 0]
+                w, h, sh_degree=sh_degree, mode="RGB+ED")
+            depth = out[..., 3]
+            color = (out[..., :3].clamp(0, 1) * 255).byte().cpu().numpy()
             valid = alpha[..., 0] >= 0.5
             depth[~valid] = 0.0  # see-through pixels carry no surface
             up_area += _upward_area(depth, valid, torch.tensor(K, dtype=torch.float32, device=device),
                                     c2w, n_bins)
             rgbd = o3d.geometry.RGBDImage.create_from_color_and_depth(
-                o3d.geometry.Image(np.zeros((h, w, 3), dtype=np.uint8)),
+                o3d.geometry.Image(np.ascontiguousarray(color)),
                 o3d.geometry.Image(np.ascontiguousarray(depth.cpu().numpy(), dtype=np.float32)),
                 depth_scale=1.0, depth_trunc=c.depth_trunc, convert_rgb_to_intensity=False)
             intr = o3d.camera.PinholeCameraIntrinsic(w, h, K[0, 0], K[1, 1], K[0, 2], K[1, 2])
@@ -152,7 +159,10 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     d = ws.reset("collision")
     (d / "refine.json").write_text(json.dumps(T, indent=2))
-    tm = trimesh.Trimesh(verts, np.asarray(mesh.triangles), process=False)
+    colors = None
+    if mesh.has_vertex_colors():
+        colors = (np.asarray(mesh.vertex_colors) * 255).round().astype(np.uint8)
+    tm = trimesh.Trimesh(verts, np.asarray(mesh.triangles), vertex_colors=colors, process=False)
     tm.export(d / "collision.glb")
     print(f"collision: {used} depth views -> {len(tm.faces)} triangles")
 

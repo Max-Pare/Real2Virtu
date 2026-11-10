@@ -42,8 +42,40 @@ def spawn_from_camera(c2w: np.ndarray) -> dict:
     return {"position": [float(pos[0]), 0.05, float(pos[2])], "yaw_deg": yaw}
 
 
+def backdrop(splat_rgba: np.ndarray, mesh_vertices: np.ndarray, mesh_colors: np.ndarray | None) -> dict:
+    """What the game shows where the splat has gaps.
+
+    `background`: average splat colour (weighted by opacity), for places never filmed.
+    `floor`: colour and extent of a flat floor under the room.
+    `mesh`: whether the collision mesh has colours and can be shown behind the splat.
+    Colours are sRGB 0-1.
+    """
+    if len(splat_rgba):
+        weight = splat_rgba[:, 3:4].astype(np.float64) + 1e-9
+        background = (splat_rgba[:, :3] * weight).sum(axis=0) / weight.sum() / 255.0
+    else:
+        background = np.zeros(3)
+    floor = background
+    has_colors = mesh_colors is not None and len(mesh_colors) == len(mesh_vertices) > 0
+    if has_colors:
+        low = mesh_vertices[:, 1] < 0.08
+        if low.sum() >= 50:
+            floor = np.median(mesh_colors[low, :3], axis=0) / 255.0
+    if len(mesh_vertices):
+        lo, hi = mesh_vertices.min(axis=0), mesh_vertices.max(axis=0)
+    else:
+        lo, hi = np.full(3, -5.0), np.full(3, 5.0)
+    return {
+        "background": [float(v) for v in background],
+        "floor": {"color": [float(v) for v in floor],
+                  "min": [float(lo[0]) - 2.0, float(lo[2]) - 2.0],
+                  "max": [float(hi[0]) + 2.0, float(hi[2]) + 2.0]},
+        "mesh": bool(has_colors),
+    }
+
+
 def build(spawn: dict, eye_height: float, splat_path: str, collision_path: str,
-          splat_center: list[float]) -> dict:
+          splat_center: list[float], backdrop: dict | None = None) -> dict:
     return {
         "version": VERSION,
         "units": "metres",
@@ -57,6 +89,8 @@ def build(spawn: dict, eye_height: float, splat_path: str, collision_path: str,
         "collision": {"path": collision_path, "floor_y": 0.0},
         "spawn": spawn,
         "eye_height": eye_height,
+        # Optional: shown where the splat has gaps (see `backdrop`).
+        "backdrop": backdrop,
         "objects": [],  # reserved: {id, splat, collision, body: "rigid"|"static", transform}
     }
 

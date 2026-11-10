@@ -12,7 +12,9 @@ Verified on a synthetic box room (RTX 5060, 8 GB): `splat` trains with gsplat, `
 
 Not yet run on real video: `poses` (COLMAP 4.2.1 option names checked, never executed) and the full chain. Training quality, VRAM use at 1.5M Gaussians and timing are unmeasured.
 
-LiDAR path verified on one real Stray Scanner scan (18 s, 66 frames kept, RTX 5060): 11.6 min training, 1.1 GB peak VRAM, rendered depth within 1.2 cm (median) of the sensor depth, exported project imports and renders in Godot 4.7.2 with the player on the floor. Not yet tried on a scan of a whole room.
+LiDAR path verified on one real Stray Scanner scan (18 s, 66 frames kept, RTX 5060): 11.6 min training at full frame size, 1.1 GB peak VRAM, rendered depth within 1.2 cm (median) of the sensor depth, exported project imports and renders in Godot 4.7.2 with the player on the floor. A longer scan (81 s, 159 frames, 1.2M Gaussians) was built and exported in about 28 minutes; its quality has not been measured.
+
+Not yet compared: video path against LiDAR path on the same capture.
 
 Known limits: one floor level only (a flat safety floor sits at the aligned floor height); scale needs `--ceiling-height` or `--scale`.
 
@@ -33,10 +35,47 @@ Splat rendering uses GDGS 3.3.0 (MIT, ReconWorldLab), vendored in `godot_templat
 r2v build kitchen.mp4 hallway.mp4 --out out/flat --ceiling-height 2.65
 ```
 
-Stages run in order and are cached in `workspace/`: `frames`, `poses`, `align`, `splat`, `collision`, `export`.
+Stages run in order and are cached in `workspace/`: `frames`, `poses`, `align`, `splat`, `clean`, `collision`, `export`.
 Re-run one stage with `--only <stage>`; ignore the cache with `--force`.
 
 Short clips: the default keeps 2 frames per second. Raise it with `--fps` when the video is under a minute (about 100 to 300 frames in total works well).
+
+### Training speed
+
+`--train-scale` is the percentage of the source frame size used for splat training (default 67, range 10 to 100). Training time follows the pixel count; the number of Gaussians matters much less.
+
+Measured on a LiDAR scan (66 frames of 1600x1200, 9900 steps, 590k Gaussians, RTX 5060), scored against the full-size photos:
+
+| `--train-scale` | Training | PSNR | SSIM | Depth error (median) |
+|---|---|---|---|---|
+| 100 | 12.6 min | 26.26 dB | 0.9033 | 1.42 cm |
+| 67 (default) | 7.4 min | 26.16 dB | 0.8998 | 1.40 cm |
+| 50 | 5.5 min | 25.65 dB | 0.8893 | 1.43 cm |
+
+The default is used on the video path too, where it has not been measured. Use `--train-scale 100` for the sharpest result.
+
+Step lines in the log show steps per second and elapsed minutes. gsplat's `packed` mode gave no gain on this GPU and is not used.
+
+### Cleanup and gaps
+
+The `clean` stage runs after training and removes Gaussians that only add haze:
+
+- near-transparent ones (opacity under 0.02);
+- oversized blobs and long needles, judged against the distance to the nearest camera, so far scenery seen through a window stays;
+- isolated ones with no neighbours;
+- LiDAR only: ones floating in space that the sensor measured as empty, in at least 3 views and 80% of the views that see them.
+
+Measured on two LiDAR scans: 32% fewer Gaussians for 0.08 dB PSNR on the short one (590,832 to 403,587), 25% fewer for 0.07 dB on the long one (1,200,000 to 902,651). The gain is a smaller file and less to draw; the picture barely changes.
+
+`--fill-holes` (LiDAR only, off by default) adds Gaussians where the splat is see-through on a measured surface. After depth-supervised training the spots it finds are mostly sensor errors (glass, cables); every variant tried lowered PSNR, by 0.1 dB at best.
+
+Gaps are hidden, not reconstructed. Where the splat is see-through the game shows:
+
+- the collision mesh in colours taken from the splat (a plain version of the same surface);
+- a flat floor in the room's floor colour under the scanned area;
+- the room's average colour instead of black where nothing was filmed.
+
+These only show through gaps and never cover the splat. `scene.json` holds them under `backdrop`; set it to `null` to get the plain black background back.
 
 ### LiDAR scan (iPhone / iPad Pro)
 
@@ -46,7 +85,7 @@ r2v build --lidar input/my_scan --workspace workspace_scan --out out/flat
 
 Record with the free Stray Scanner app and copy the scan folder (`rgb.mp4`, `odometry.csv`, `depth/`, `confidence/`) to the PC, for example through the Files app or a cable.
 
-Stages: `ingest`, `align`, `splat`, `collision`, `export`. COLMAP and ffmpeg are not used. The scan supplies:
+Stages: `ingest`, `align`, `splat`, `clean`, `collision`, `export`. COLMAP and ffmpeg are not used. The scan supplies:
 
 - camera poses and real-world scale from ARKit, so no `--camera-height` or `--ceiling-height` is needed;
 - the up direction (ARKit's world is gravity-aligned);
@@ -90,8 +129,8 @@ WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` to
 out/flat/
   project.godot, main.tscn, player/, scripts/
   assets/scene.splat      Gaussians, Y-up, metres
-  assets/collision.glb    collision proxy
-  scene.json              manifest the Godot scene is built from; `objects` is reserved for interactables
+  assets/collision.glb    collision proxy with vertex colours; also shown behind the splat
+  scene.json              manifest the Godot scene is built from; `backdrop` says what fills gaps, `objects` is reserved for interactables
 ```
 
 ## Tests

@@ -51,6 +51,9 @@ class SplatCfg:
     steps: int = 20_000
     cap: int = 1_500_000       # hard limit on Gaussians, sized for 8 GB VRAM
     auto_size: bool = False    # lower steps and cap for small captures (see splat.auto_size)
+    # Percent of the source frame size used for training. 67 cut training time by 41%
+    # for 0.1 dB PSNR on the test scan; 50 cut it by 56% for 0.6 dB. 100 = full size.
+    train_scale: float = 67.0
     sh_degree: int = 3
     ssim_weight: float = 0.2
     opacity_reg: float = 0.01
@@ -59,6 +62,34 @@ class SplatCfg:
     pose_opt: bool = False     # learn a small correction per camera (on for LiDAR poses)
     pose_lr: float = 5e-5
     seed: int = 0
+
+
+@dataclass
+class CleanCfg:
+    min_opacity: float = 0.02         # below this a Gaussian only adds haze
+    # Size limits are the larger of a fixed length (metres) and a share of the
+    # distance to the nearest camera, so far scenery seen through windows survives.
+    max_size: float = 0.3
+    max_size_per_m: float = 0.2
+    needle_ratio: float = 20.0        # longest axis against the middle one
+    needle_length: float = 0.25
+    needle_length_per_m: float = 0.1
+    isolated_gap: float = 0.15        # mean distance to the 3 nearest neighbours
+    isolated_gap_per_m: float = 0.1
+    # LiDAR only
+    carve: bool = True                # drop Gaussians in space the sensor saw as empty
+    # Add Gaussians on measured surfaces the splat leaves see-through. Off: after
+    # depth-supervised training the spots it finds are mostly sensor errors (glass,
+    # cables), and it lowered PSNR on both test scans (-0.1 dB at best).
+    fill: bool = False
+    margin: float = 0.12              # metres in front of / behind the measured surface
+    margin_rel: float = 0.06          # ... or this share of the depth, whichever is larger
+    carve_min_views: int = 3
+    carve_min_share: float = 0.8      # share of the views seeing the Gaussian that must agree
+    fill_smooth_rel: float = 0.05     # skip depth jumps larger than this share of the depth
+    fill_voxel: float = 0.02          # metres between added Gaussians
+    fill_min_views: int = 6           # views that must report the same uncovered spot
+    fill_max: int = 300_000
 
 
 @dataclass
@@ -87,5 +118,6 @@ class Config:
     poses: PosesCfg = field(default_factory=PosesCfg)
     align: AlignCfg = field(default_factory=AlignCfg)
     splat: SplatCfg = field(default_factory=SplatCfg)
+    clean: CleanCfg = field(default_factory=CleanCfg)
     collision: CollisionCfg = field(default_factory=CollisionCfg)
     export: ExportCfg = field(default_factory=ExportCfg)

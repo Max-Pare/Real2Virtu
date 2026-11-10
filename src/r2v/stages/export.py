@@ -11,7 +11,7 @@ import trimesh
 from .. import manifest
 from ..config import Config
 from ..workspace import Workspace
-from . import collision
+from . import clean, collision
 
 TEMPLATE = Path(__file__).resolve().parents[3] / "godot_template"
 
@@ -34,7 +34,7 @@ def run(ws: Workspace, cfg: Config) -> None:
     k, shift = T["scale"], np.array([0.0, T["floor_shift"], 0.0])
 
     # .splat records are 32 bytes: position f32x3, linear scale f32x3, then 8 bytes of colour/rotation.
-    raw = np.fromfile(ws.dir("splat") / "scene.splat", dtype="<f4").reshape(-1, 8).copy()
+    raw = np.fromfile(clean.output(ws, "scene.splat"), dtype="<f4").reshape(-1, 8).copy()
     raw[:, :3] = k * (raw[:, :3] - shift)
     raw[:, 3:6] *= k
     raw.tofile(assets / "scene.splat")
@@ -42,10 +42,15 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     c2w = np.load(ws.dir("align") / "scene.npz", allow_pickle=False)["c2w"].copy()
     c2w[:, :3, 3] = k * (c2w[:, :3, 3] - shift)
+    mesh_colors = None
     try:
-        obstacles = np.asarray(trimesh.load(assets / "collision.glb", force="mesh").vertices)
+        mesh = trimesh.load(assets / "collision.glb", force="mesh")
+        obstacles = np.asarray(mesh.vertices)
+        if mesh.visual.kind == "vertex":
+            mesh_colors = np.asarray(mesh.visual.vertex_colors)
     except Exception:
         obstacles = np.zeros((0, 3))
+    rgba = raw[:, 6:7].copy().view(np.uint8)  # bytes 24-27 of each record
     spawn_cam = manifest.pick_spawn_camera(c2w, obstacles)
     eye = c.eye_height if c.eye_height is not None else manifest.eye_height_from_cameras(c2w)
     m = manifest.build(
@@ -54,6 +59,7 @@ def run(ws: Workspace, cfg: Config) -> None:
         eye_height=eye,
         splat_path="res://assets/scene.splat",
         collision_path="res://assets/collision.glb",
+        backdrop=manifest.backdrop(rgba, obstacles, mesh_colors),
     )
     manifest.write(out / "scene.json", m)
 

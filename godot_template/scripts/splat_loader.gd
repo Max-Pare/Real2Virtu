@@ -19,8 +19,8 @@ static func create(path: String) -> Node3D:
 
 
 ## Call after the node is in the tree.
-## `center` is splat.center from scene.json.
-static func finish_setup(world: Node3D, node: Node3D, center: Vector3) -> void:
+## `center` is splat.center from scene.json. `background` is shown where nothing was filmed.
+static func finish_setup(world: Node3D, node: Node3D, center: Vector3, background: Color) -> void:
 	# GDGS rotates identity-transform nodes by 180 degrees to stand Y-down captures
 	# upright. The r2v pipeline already outputs Y-up, so undo that.
 	# GDGS also recentres imported data on its mean position; put it back.
@@ -28,11 +28,18 @@ static func finish_setup(world: Node3D, node: Node3D, center: Vector3) -> void:
 
 	# The compute backend draws through a compositor pass.
 	var effect := GaussianCompositorEffect.new()
+	# The backdrop mesh and floor may only show through gaps in the splat, never
+	# hide it: the mesh is wrong at windows and glass, where it would cover the
+	# view outside. A huge bias switches the compositor's depth rejection off.
+	effect.depth_bias = 100000.0
+	# With scene geometry behind it, the compositor drops splat pixels that have no
+	# depth, and depth is only recorded above this opacity. Keep faint splats too.
+	effect.depth_capture_alpha = 0.02
 	var compositor := Compositor.new()
 	compositor.compositor_effects = [effect]
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
-	env.background_color = Color.BLACK
+	env.background_color = background
 	var world_env := WorldEnvironment.new()
 	world_env.environment = env
 	world_env.compositor = compositor

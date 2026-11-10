@@ -15,8 +15,8 @@ from .workspace import Workspace, file_fingerprint, make_key
 
 app = typer.Typer(add_completion=False, help=__doc__)
 
-STAGES = ["frames", "poses", "align", "splat", "collision", "export"]
-LIDAR_STAGES = ["ingest", "align", "splat", "collision", "export"]
+STAGES = ["frames", "poses", "align", "splat", "clean", "collision", "export"]
+LIDAR_STAGES = ["ingest", "align", "splat", "clean", "collision", "export"]
 
 
 def stages_for(source: str) -> list[str]:
@@ -61,6 +61,8 @@ def build(
     fps: float = typer.Option(2.0, help="Frames kept per second of video. Raise for short clips."),
     steps: Optional[int] = typer.Option(None, help="Splat training steps (default 20000; LiDAR: sized to the scan)."),
     cap: Optional[int] = typer.Option(None, help="Maximum number of Gaussians (default 1500000; LiDAR: sized to the scan)."),
+    train_scale: float = typer.Option(67.0, min=10.0, max=100.0, help="Percent of the source frame size used for splat training. Lower is faster and a little softer; 100 = full size."),
+    fill_holes: bool = typer.Option(False, help="LiDAR only: add Gaussians where the splat is see-through on measured surfaces. Off by default: it did not improve the test scans."),
     depth_weight: float = typer.Option(0.2, help="LiDAR only: weight of the depth term in training; 0 turns it off."),
     colmap: str = typer.Option("colmap", help="COLMAP executable."),
     ffmpeg: str = typer.Option("ffmpeg", help="ffmpeg executable."),
@@ -94,6 +96,8 @@ def build(
     if cap is not None:
         cfg.splat.cap = cap
     cfg.splat.depth_weight = depth_weight
+    cfg.splat.train_scale = train_scale
+    cfg.clean.fill = fill_holes
     cfg.export.out = str(out)
     if source == "lidar":
         # ARKit poses are metric but drift slightly, so: no rescaling, pose refinement on.

@@ -13,13 +13,22 @@ func _ready() -> void:
 		push_error("scene.json missing or invalid; run the r2v pipeline export stage")
 		return
 
+	# Optional "backdrop": what to show where the splat has gaps.
+	var backdrop: Dictionary = {}
+	if typeof(m.get("backdrop")) == TYPE_DICTIONARY:
+		backdrop = m["backdrop"]
+
 	var splat := SplatLoader.create(m["splat"]["path"])
 	if splat:
 		add_child(splat)
 		var c: Array = m["splat"]["center"]
-		SplatLoader.finish_setup(self, splat, Vector3(c[0], c[1], c[2]))
-	_add_collision(m["collision"]["path"], splat == null)
-	_add_safety_floor(m["collision"].get("floor_y", 0.0))
+		SplatLoader.finish_setup(self, splat, Vector3(c[0], c[1], c[2]),
+				_color(backdrop.get("background"), Color.BLACK))
+	var floor_y: float = m["collision"].get("floor_y", 0.0)
+	_add_collision(m["collision"]["path"], splat == null, splat != null and backdrop.get("mesh", false))
+	_add_safety_floor(floor_y)
+	if splat and backdrop.has("floor"):
+		_add_backdrop_floor(backdrop["floor"], floor_y)
 
 	var spawn: Dictionary = m["spawn"]
 	var p: Array = spawn["position"]
@@ -35,7 +44,38 @@ func _ready() -> void:
 		_screenshot_and_quit(shot)
 
 
-func _add_collision(path: String, show_mesh: bool) -> void:
+func _color(value: Variant, fallback: Color) -> Color:
+	# Colours in scene.json are sRGB 0-1 triples.
+	if typeof(value) != TYPE_ARRAY or value.size() < 3:
+		return fallback
+	return Color(value[0], value[1], value[2])
+
+
+func _backdrop_material() -> StandardMaterial3D:
+	# Unlit: the colours already contain the room's lighting.
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	return mat
+
+
+func _add_backdrop_floor(spec: Dictionary, floor_y: float) -> void:
+	# A plain floor in the room's floor colour, a little below the scanned one, so
+	# unfilmed floor does not show as a hole under the player's feet.
+	var lo: Array = spec["min"]
+	var hi: Array = spec["max"]
+	var plane := PlaneMesh.new()
+	plane.size = Vector2(hi[0] - lo[0], hi[1] - lo[1])
+	var mat := _backdrop_material()
+	mat.albedo_color = _color(spec.get("color"), Color(0.3, 0.3, 0.3))
+	var node := MeshInstance3D.new()
+	node.name = "BackdropFloor"
+	node.mesh = plane
+	node.material_override = mat
+	node.position = Vector3((lo[0] + hi[0]) / 2.0, floor_y - 0.05, (lo[1] + hi[1]) / 2.0)
+	add_child(node)
+
+
+func _add_collision(path: String, show_mesh: bool, as_backdrop: bool) -> void:
 	var packed: PackedScene = load(path)
 	if packed == null:
 		push_error("collision mesh not found: " + path)
@@ -45,7 +85,14 @@ func _add_collision(path: String, show_mesh: bool) -> void:
 	for node in root.find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
 		mesh.create_trimesh_collision()
-		mesh.visible = show_mesh
+		mesh.visible = show_mesh or as_backdrop
+		if as_backdrop:
+			# Shown behind the splat in its own colours: gaps in the splat then show
+			# a plain version of the surface instead of the background.
+			var mat := _backdrop_material()
+			mat.vertex_color_use_as_albedo = true
+			mat.vertex_color_is_srgb = true
+			mesh.material_override = mat
 	if show_mesh:
 		# No splat available: light the grey collision mesh so the map is still walkable.
 		var sun := DirectionalLight3D.new()
@@ -74,6 +121,10 @@ func _screenshot_and_quit(path: String) -> void:
 	# Automated run: leave the user's mouse alone and ignore their input.
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	player.set_process_unhandled_input(false)
+	# R2V_SHOT_YAW=<degrees> turns the player first, to check other directions.
+	var turn := OS.get_environment("R2V_SHOT_YAW")
+	if turn != "":
+		player.rotation.y += deg_to_rad(float(turn))
 	for i in 90:  # let the splat upload and the player settle on the floor
 		await get_tree().process_frame
 	get_viewport().get_texture().get_image().save_png(path)

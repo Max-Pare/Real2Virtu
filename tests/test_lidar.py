@@ -154,6 +154,17 @@ def test_auto_size_shrinks_budget_for_small_scans():
     assert splat.auto_size(20_000, 1_500_000, 900, 900_000) == (20_000, 1_500_000)
 
 
+def test_train_scale_is_a_percentage_of_the_source():
+    from r2v.stages import splat
+
+    assert Config().splat.train_scale == 67.0
+    assert splat.scaled_size(1600, 1200, 67) == (1072, 804)
+    assert splat.scaled_size(1600, 1200, 50) == (800, 600)
+    assert splat.scaled_size(1600, 1200, 100) == (1600, 1200)
+    assert splat.scaled_size(1600, 1200, 150) == (1600, 1200)  # never upscales
+
+
 def test_stage_list_follows_source():
-    assert cli.stages_for("lidar") == ["ingest", "align", "splat", "collision", "export"]
+    assert cli.stages_for("lidar") == ["ingest", "align", "splat", "clean", "collision", "export"]
+    assert cli.stages_for("video")[3:] == ["splat", "clean", "collision", "export"]
     assert cli.stages_for("video")[:2] == ["frames", "poses"]

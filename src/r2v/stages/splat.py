@@ -110,6 +110,12 @@ def auto_size(steps: int, cap: int, n_frames: int, n_points: int) -> tuple[int, 
             min(cap, max(300_000, 3 * n_points)))
 
 
+def scaled_size(w: int, h: int, percent: float) -> tuple[int, int]:
+    """Frame size at `percent` of the source; never larger than the source."""
+    f = min(max(percent, 1.0), 100.0) / 100.0
+    return max(1, int(round(w * f))), max(1, int(round(h * f)))
+
+
 def _init_params(scene: dict, cfg, cap: int, device):
     import torch
     from scipy.spatial import cKDTree
@@ -154,10 +160,17 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     # Images stay on the CPU as uint8; one moves to the GPU per step.
     images = []
-    for name in scene["names"]:
+    K_train = scene["K"].copy()
+    for n_img, name in enumerate(scene["names"]):
         bgr = cv2.imread(str(img_dir / str(name)))
         if bgr is None:
             raise SystemExit(f"splat: missing image {name}")
+        h0, w0 = bgr.shape[:2]
+        w1, h1 = scaled_size(w0, h0, c.train_scale)
+        if (w1, h1) != (w0, h0):
+            bgr = cv2.resize(bgr, (w1, h1), interpolation=cv2.INTER_AREA)
+            K_train[n_img, 0] *= w1 / w0
+            K_train[n_img, 1] *= h1 / h0
         images.append(torch.from_numpy(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
     # Sensor depth (LiDAR path): small uint16 maps in millimetres, 0 = no measurement.
     depths = None
@@ -170,8 +183,11 @@ def run(ws: Workspace, cfg: Config) -> None:
             depths.append(torch.from_numpy(mm.astype(np.int32)))
         depth_unit = float(scene["depth_scale"]) / 1000.0  # millimetres -> scene units
         print(f"splat: depth supervision from {len(depths)} sensor maps")
+    w_src, h_src = (int(v) for v in scene["sizes"][0])
+    print(f"splat: training at {c.train_scale:g}% of the source frames "
+          f"({w_src}x{h_src} -> {images[0].shape[1]}x{images[0].shape[0]})", flush=True)
     c2w = torch.tensor(scene["c2w"], dtype=torch.float32, device=device)
-    Ks = torch.tensor(scene["K"], dtype=torch.float32, device=device)
+    Ks = torch.tensor(K_train, dtype=torch.float32, device=device)
 
     steps, cap = c.steps, c.cap
     if c.auto_size:
@@ -256,6 +272,11 @@ def run(ws: Workspace, cfg: Config) -> None:
                   f"{rate:.1f} steps/s, {(now - started) / 60:.1f} min", flush=True)
 
     d = ws.reset("splat")
+    if pose_delta is not None:
+        # The poses the splat was fitted to; scene.npz keeps the unrefined ones.
+        with torch.no_grad():
+            refined = torch.stack([c2w[i] @ pose_delta_matrix(pose_delta[i]) for i in range(n)])
+        np.save(d / "refined_c2w.npy", refined.cpu().numpy())
     out = {k: v.detach().cpu() for k, v in params.items()}
     torch.save(out, d / "ckpt.pt")
     arr = {k: v.numpy() for k, v in out.items()}
