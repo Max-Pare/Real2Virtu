@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.godot/
+
+# Captures, stage caches and exported games: large and personal
+input/
+workspace*/
+out/
+
+# Local toolchain (Python, COLMAP, compiled gsplat cache); keep the env check script
+tools/*
+!tools/check_env.py
