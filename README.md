@@ -121,7 +121,9 @@ For LiDAR scans the same tips hold, and: stay within about 4 m of the surfaces y
 
 ## Controls in the exported game
 
-WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. Esc frees the mouse.
+WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. `R` returns to the start point. Esc frees the mouse.
+
+The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's default engine wedges the player on the edges of scanned triangle meshes. If the walker is still blocked in every direction it frees itself: a small step up when that clears the obstacle, otherwise back to the last place where walking worked.
 
 ## Output
 
@@ -138,3 +140,11 @@ out/flat/
 ```
 python -m pytest
 ```
+
+Walk test (needs Godot and an exported project): drives the player through random one-second walks inside the scanned area, headless, and counts places where no direction moves it. It uses the current `godot_template` with the project's collision mesh.
+
+```
+python tests/godot/run_walk_test.py out/room
+```
+
+`R2V_WALK_TRIES=<n>` sets the number of walks (default 2000).

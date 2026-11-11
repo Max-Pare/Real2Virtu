@@ -32,8 +32,7 @@ func _ready() -> void:
 
 	var spawn: Dictionary = m["spawn"]
 	var p: Array = spawn["position"]
-	player.position = Vector3(p[0], p[1], p[2])
-	player.rotation.y = deg_to_rad(spawn["yaw_deg"])
+	player.set_spawn(Vector3(p[0], p[1], p[2]), deg_to_rad(spawn["yaw_deg"]))
 	player.set_eye_height(m.get("eye_height", 1.6))
 
 	# m["objects"] is reserved for interactable objects in a later version.

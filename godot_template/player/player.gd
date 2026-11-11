@@ -3,7 +3,18 @@ extends CharacterBody3D
 ## Walk: WASD or arrows, mouse look, Space jumps, gravity and collision on.
 ## Fly (toggle with F): WASD moves where the camera looks, Space/E up, Q/Ctrl down,
 ##   no gravity, passes through everything.
-## Shift moves faster in both modes. Esc frees the mouse, click captures it again.
+## Shift moves faster in both modes. R returns to the start point.
+## Esc frees the mouse, click captures it again.
+##
+## Scanned collision meshes are rough, so the walker can end up wedged. When it is
+## blocked in every direction it frees itself: a small step up if that clears the
+## obstacle, otherwise back to the last place where walking worked.
+
+const STUCK_AFTER := 0.4      # seconds of pushing without moving before checking
+const SAFE_SPOT_EVERY := 0.5  # seconds of free walking between remembered spots
+const SAFE_SPOTS_KEPT := 10
+const STEP_HEIGHTS := [0.1, 0.2, 0.3, 0.45]
+const PROBE := 0.15           # metres tested in each direction
 
 const WALK_SPEED := 2.5
 const FLY_SPEED := 3.0
@@ -15,6 +26,15 @@ const MOUSE_SENS := 0.0025
 @onready var body_shape: CollisionShape3D = $Collision
 
 var flying := false
+## Set to a Vector2 to drive the player from a script instead of the keyboard (automated tests).
+var input_override: Variant = null
+## How often the walker had to free itself (read by automated tests).
+var unstuck_count := 0
+var _stuck_for := 0.0
+var _free_for := 0.0
+var _safe_spots: Array[Vector3] = []
+var _spawn := Transform3D.IDENTITY
+var _has_spawn := false
 var _gravity: float = ProjectSettings.get_setting("physics/3d/default_gravity")
 
 
@@ -28,11 +48,31 @@ func _ready() -> void:
 	_bind("fly_down", [KEY_Q, KEY_CTRL])
 	_bind("move_fast", [KEY_SHIFT])
 	_bind("toggle_fly", [KEY_F])
+	_bind("respawn", [KEY_R])
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func set_eye_height(h: float) -> void:
 	camera.position.y = h
+
+
+## Remember where the level starts; R comes back here.
+func set_spawn(pos: Vector3, yaw: float) -> void:
+	position = pos
+	rotation.y = yaw
+	_spawn = transform
+	_has_spawn = true
+	_safe_spots.clear()
+
+
+func respawn() -> void:
+	if not _has_spawn:
+		return
+	transform = _spawn
+	camera.rotation.x = 0.0
+	velocity = Vector3.ZERO
+	_stuck_for = 0.0
+	_safe_spots.clear()
 
 
 func set_flying(on: bool) -> void:
@@ -57,6 +97,8 @@ func _unhandled_input(event: InputEvent) -> void:
 		camera.rotation.x = clamp(camera.rotation.x - event.relative.y * MOUSE_SENS, -1.5, 1.5)
 	elif event.is_action_pressed("toggle_fly"):
 		set_flying(not flying)
+	elif event.is_action_pressed("respawn"):
+		respawn()
 	elif event.is_action_pressed("ui_cancel"):
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	elif event is InputEventMouseButton and event.pressed:
@@ -65,6 +107,8 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _physics_process(delta: float) -> void:
 	var input := Input.get_vector("move_left", "move_right", "move_forward", "move_back")
+	if input_override != null:
+		input = input_override
 	var fast := FAST_FACTOR if Input.is_action_pressed("move_fast") else 1.0
 	if flying:
 		# Move along the camera's own axes, so looking up and pressing W climbs.
@@ -80,4 +124,60 @@ func _physics_process(delta: float) -> void:
 	var dir := (transform.basis * Vector3(input.x, 0, input.y)).normalized()
 	velocity.x = dir.x * WALK_SPEED * fast
 	velocity.z = dir.z * WALK_SPEED * fast
+	var before := position
 	move_and_slide()
+	_watch_for_stuck(dir, Vector2(position.x - before.x, position.z - before.z).length(), delta)
+
+
+func _watch_for_stuck(dir: Vector3, moved: float, delta: float) -> void:
+	if dir.length() < 0.1:
+		_stuck_for = 0.0
+		return
+	if moved > 0.2 * WALK_SPEED * delta:
+		_stuck_for = 0.0
+		_free_for += delta
+		if _free_for >= SAFE_SPOT_EVERY and is_on_floor():
+			_free_for = 0.0
+			_safe_spots.append(position)
+			if _safe_spots.size() > SAFE_SPOTS_KEPT:
+				_safe_spots.pop_front()
+		return
+	_stuck_for += delta
+	if _stuck_for < STUCK_AFTER:
+		return
+	_stuck_for = 0.0
+	# Pushing against a wall also goes nowhere. Only act when no direction is open.
+	if _any_direction_open(global_transform):
+		return
+	_free_self(dir)
+
+
+func _any_direction_open(from: Transform3D) -> bool:
+	for k in 8:
+		var probe := Vector3(cos(TAU * k / 8.0), 0, sin(TAU * k / 8.0)) * PROBE
+		if not test_move(from, probe):
+			return true
+	return false
+
+
+func _free_self(dir: Vector3) -> void:
+	unstuck_count += 1
+	# 1. A small step up, if the way the player wants to go is open from there.
+	for h: float in STEP_HEIGHTS:
+		var up: Vector3 = Vector3.UP * h
+		if test_move(global_transform, up):
+			break  # something overhead; higher steps are blocked too
+		if not test_move(global_transform.translated(up), dir * PROBE):
+			position += up + dir * PROBE
+			velocity = Vector3.ZERO
+			return
+	# 2. Back to the most recent place where walking worked.
+	while not _safe_spots.is_empty():
+		var spot: Vector3 = _safe_spots.pop_back()
+		if spot.distance_to(position) < 0.3:
+			continue  # too close to the trap
+		position = spot
+		velocity = Vector3.ZERO
+		return
+	# 3. Nothing remembered: start over.
+	respawn()

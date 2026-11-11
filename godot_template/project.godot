@@ -13,6 +13,10 @@ config/features=PackedStringArray("4.3", "Forward Plus")
 
 enabled=PackedStringArray("res://addons/gdgs/plugin.cfg")
 
+[physics]
+
+3d/physics_engine="Jolt Physics"
+
 [rendering]
 
 renderer/rendering_method="forward_plus"
