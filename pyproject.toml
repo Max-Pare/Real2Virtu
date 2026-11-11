@@ -19,6 +19,20 @@ gpu = [
     "gsplat>=1.4",
     "open3d>=0.19",
 ]
+# AMD Radeon on Linux (ROCm) instead of `gpu`. gsplat is not listed: it is built
+# from AMD's fork by scripts/build_amd_gsplat.sh after `uv sync --extra amd`.
+amd = [
+    "torch>=2.7; sys_platform == 'linux'",
+    # torch's own dependency; listed so that uv takes it from the ROCm index too
+    "triton-rocm; sys_platform == 'linux'",
+    "open3d>=0.19",
+    "ninja",
+    "jaxtyping",
+    "rich>=12",
+    "packaging",
+    "setuptools",
+    "wheel",
+]
 dev = ["pytest>=8"]
 
 [project.scripts]
@@ -31,12 +45,25 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/r2v"]
 
+[tool.uv]
+conflicts = [[{ extra = "gpu" }, { extra = "amd" }]]
+
 [tool.uv.sources]
-torch = { index = "pytorch-cu128" }
+torch = [
+    { index = "pytorch-cu128", extra = "gpu" },
+    { index = "pytorch-rocm", extra = "amd" },
+]
+triton-rocm = { index = "pytorch-rocm", extra = "amd" }
 
 [[tool.uv.index]]
 name = "pytorch-cu128"
 url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+# Keep in step with the system ROCm (headers and hipcc compile gsplat against it).
+[[tool.uv.index]]
+name = "pytorch-rocm"
+url = "https://download.pytorch.org/whl/rocm7.2"
 explicit = true
 
 [tool.pytest.ini_options]

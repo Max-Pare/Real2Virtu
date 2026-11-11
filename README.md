@@ -2,7 +2,7 @@
 
 Turns one or more videos of an interior, or a LiDAR scan from an iPhone/iPad Pro, into a walkable Godot 4 project.
 Visuals are Gaussian splats; physics uses a hidden simplified collision mesh.
-Sized for a single NVIDIA GPU with 8 GB VRAM.
+Sized for a single NVIDIA GPU with 8 GB VRAM. AMD Radeon on Linux works through ROCm (see "AMD Radeon on Linux").
 
 ## Status
 
@@ -24,6 +24,28 @@ Known limits: one floor level only (a flat safety floor sits at the aligned floo
 - gsplat compiles its CUDA code on first use (about 80 s): needs Visual Studio Build Tools (C++ workload) and the CUDA Toolkit matching torch. `src/r2v/gsplat_compat.py` loads that environment and works around two Windows build problems, so a plain shell is enough
 - ffmpeg on PATH; COLMAP (CUDA build) on PATH, in `tools/colmap/`, or passed with `--colmap`
 - Godot 4.3+ (tested on 4.7.2), Forward+ renderer
+
+### AMD Radeon on Linux
+
+Tested on an RX 7800 XT (CachyOS, ROCm 7.2.4, torch 2.14.1+rocm7.2, Python 3.12). gsplat has no AMD build on PyPI, so it is compiled from AMD's fork (`AMD-Ecosystem/gsplat`, tag `gsplat-1.5.3b2`), which is written for AMD's datacentre cards and is patched here for Radeon.
+
+```
+sudo pacman -S rocm-hip-sdk            # compiler and headers; other distros: the ROCm SDK
+uv sync --python 3.12 --extra amd --extra dev
+scripts/build_amd_gsplat.sh            # about 80 s; clones into tools/amd_gsplat
+.venv/bin/python -m pytest             # includes tests/test_gsplat_gpu.py
+```
+
+- Use the `amd` extra instead of `gpu`; the two cannot be installed together.
+- The ROCm SDK and the torch wheel must share a major.minor version. The wheel index is set in `pyproject.toml` (`pytorch-rocm`, now `rocm7.2`).
+- The script patches the fork in three ways: an allocator name that newer torch changed, the GLM include path, and the wavefront size. The fork hardcodes 64 threads per wavefront; Radeon cards run 32. Forcing 64 compiles and renders but returns wrong gradients, which is what `tests/test_gsplat_gpu.py` guards against. Re-run the script after changing torch or ROCm.
+- `uv sync` removes packages it did not install, gsplat included. Use `uv sync --inexact --extra amd --extra dev` later on, or re-run the script.
+- With an integrated GPU present the script builds for the first GPU `rocminfo` lists; set `R2V_ROCM_ARCH=gfx1101` (or your card's name) to choose.
+- COLMAP for the video path does not need a CUDA build.
+
+Verified on a synthetic box room (72 frames of 640x480, 3000 steps): training converges to 32.3 dB PSNR on the training views at about 20 steps per second, 0.5 GB peak VRAM; `clean`, `collision` and `export` run; the collision mesh matches the room within 8 cm; Godot 4.7.2 imports the project and the walk test reports no stuck positions. Not yet run on a real capture.
+
+Speed: the compiled rasteriser is fast (16 ms forward at 1600x1200 with 600k Gaussians), but the plain torch parts of a training step are slow on ROCm. A step at that load takes about 190 ms, against roughly 76 ms on the RTX 5060 in the table below. The time goes to the SSIM blur, the optimiser steps and the MCMC noise step; none of this has been tuned.
 
 Open the exported project in the Godot editor once (or run `godot --headless --path <project> --import`) so the splat gets imported before the game runs.
 

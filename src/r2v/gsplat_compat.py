@@ -62,6 +62,17 @@ def _strip_gcc_flags() -> None:
     ext._jit_compile = patched
 
 
+def point_to_gpu_id_table() -> None:
+    """ROCm torch bundles a libdrm that looks for AMD's GPU name table in /opt/amdgpu
+    and prints "(null): No such file or directory" when it is missing. Point it at
+    the system copy. Must happen before torch is imported, so r2v/__init__ calls it."""
+    if sys.platform != "linux":
+        return
+    table = Path("/usr/share/libdrm")
+    if (table / "amdgpu.ids").exists():
+        os.environ.setdefault("AMDGPU_ASIC_ID_TABLE_PATHS", str(table))
+
+
 def prepare() -> None:
     global _done
     if _done or sys.platform != "win32":
