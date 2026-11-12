@@ -64,7 +64,7 @@ def build(
     train_scale: float = typer.Option(67.0, min=10.0, max=100.0, help="Percent of the source frame size used for splat training. Lower is faster and a little softer; 100 = full size."),
     fill_holes: bool = typer.Option(False, help="LiDAR only: add Gaussians where the splat is see-through on measured surfaces. Off by default: it did not improve the test scans."),
     depth_weight: float = typer.Option(0.2, help="LiDAR only: weight of the depth term in training; 0 turns it off."),
-    exposure: bool = typer.Option(True, help="Learn one colour gain per frame during training, for footage with changing exposure."),
+    exposure: bool = typer.Option(False, help="Learn one colour gain per frame during training, for footage with changing exposure. Off by default: it lowered quality on the first real scan."),
     colmap: str = typer.Option("colmap", help="COLMAP executable."),
     ffmpeg: str = typer.Option("ffmpeg", help="ffmpeg executable."),
     vocab_tree: Optional[Path] = typer.Option(None, help="COLMAP vocab tree for loop closure."),

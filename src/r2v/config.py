@@ -62,7 +62,7 @@ class SplatCfg:
     pose_lr: float = 5e-5
     # Learn one brightness and colour gain per frame. Phones change exposure and white
     # balance while filming; without this the changes are baked into the scene as patches.
-    exposure_opt: bool = True
+    exposure_opt: bool = False  # off: on the first real scan it cost 19% of the kept Gaussians
     exposure_lr: float = 1e-2
     seed: int = 0
 
