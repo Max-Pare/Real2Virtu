@@ -36,14 +36,44 @@ def _load_msvc_env() -> None:
             os.environ[key] = value
 
 
+CUDA_TOOLKIT_GLOB = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*"
+
+
+def find_cuda_toolkit(torch_cuda: str | None) -> str | None:
+    """Installed CUDA Toolkit folder that fits the torch build, or None.
+
+    Several toolkits can be installed side by side, and CUDA_PATH points at the
+    newest. gsplat must be compiled with the major version torch was built for:
+    CUDA 13 headers do not compile with the flags torch passes for a cu12x build.
+    Prefers the exact major.minor, then the newest toolkit of the same major.
+    """
+    if not torch_cuda:
+        return None
+    want = tuple(int(p) for p in torch_cuda.split(".")[:2])
+    found = []
+    for path in glob.glob(CUDA_TOOLKIT_GLOB):
+        try:
+            version = tuple(int(p) for p in Path(path).name[1:].split(".")[:2])
+        except ValueError:
+            continue
+        if version[0] == want[0]:
+            found.append((version == want, version, path))
+    return max(found)[2] if found else None
+
+
 def _load_cuda_env() -> None:
-    if not os.environ.get("CUDA_PATH") and not os.environ.get("CUDA_HOME"):
-        hits = sorted(glob.glob(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*"))
-        if hits:
-            os.environ["CUDA_PATH"] = hits[-1]
-    cuda = os.environ.get("CUDA_PATH") or os.environ.get("CUDA_HOME")
-    if cuda:
-        os.environ["PATH"] = os.path.join(cuda, "bin") + os.pathsep + os.environ["PATH"]
+    import torch
+
+    cuda = find_cuda_toolkit(torch.version.cuda)
+    if cuda is None:
+        installed = ", ".join(Path(p).name for p in sorted(glob.glob(CUDA_TOOLKIT_GLOB))) or "none"
+        raise SystemExit(
+            f"gsplat needs CUDA Toolkit {torch.version.cuda} to compile (torch is built for it); "
+            f"installed: {installed}.\nRun setup.bat, or: winget install --exact --id Nvidia.CUDA "
+            f"--version {torch.version.cuda}  (it installs next to other versions).")
+    # Both names, overriding the machine-wide value: torch reads CUDA_HOME first.
+    os.environ["CUDA_PATH"] = os.environ["CUDA_HOME"] = cuda
+    os.environ["PATH"] = os.path.join(cuda, "bin") + os.pathsep + os.environ["PATH"]
 
 
 def _strip_gcc_flags() -> None:

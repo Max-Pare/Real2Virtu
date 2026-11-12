@@ -37,7 +37,7 @@ COLMAP_URL = f"https://github.com/colmap/colmap/releases/download/{COLMAP_VERSIO
 COLMAP_SHA256 = "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881"
 
 VCVARS_GLOB = r"C:\Program Files*\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvars64.bat"
-CUDA_GLOB = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v*"
+CUDA_GLOB = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8*"
 
 failed: list[str] = []
 
@@ -145,6 +145,8 @@ def step_system() -> None:
          "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"])
     winget_install(
         "CUDA Toolkit 12.8",
+        # Exactly this version: a newer major (13.x) cannot compile gsplat for this torch.
+        # It installs next to other CUDA versions.
         bool(glob.glob(CUDA_GLOB)),
         ["--id", "Nvidia.CUDA", "--version", "12.8"])
 
