@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from .. import manifest
+from .. import manifest, splat_io
 from ..config import Config
 from ..workspace import Workspace
 from . import clean, collision
@@ -37,8 +37,20 @@ def run(ws: Workspace, cfg: Config) -> None:
     raw = np.fromfile(clean.output(ws, "scene.splat"), dtype="<f4").reshape(-1, 8).copy()
     raw[:, :3] = k * (raw[:, :3] - shift)
     raw[:, 3:6] *= k
-    raw.tofile(assets / "scene.splat")
     center = raw[:, :3].astype(np.float64).mean(axis=0) if len(raw) else np.zeros(3)
+    # Prefer the PLY: it carries view-dependent colour, which training relies on. The
+    # .splat holds base colour only; on a large scan that alone cost 3.5 dB PSNR.
+    ply = clean.output(ws, "scene.ply")
+    for old in ("scene.splat", "scene.ply"):  # a re-export must not leave the other format behind
+        for stale in (assets / old, assets / (old + ".import")):
+            stale.unlink(missing_ok=True)
+    if ply.exists():
+        splat_name = "scene.ply"
+        xyz = splat_io.transform_ply(ply, assets / splat_name, k, shift)
+        center = xyz.astype(np.float64).mean(axis=0) if len(xyz) else center
+    else:
+        splat_name = "scene.splat"
+        raw.tofile(assets / splat_name)
 
     c2w = np.load(ws.dir("align") / "scene.npz", allow_pickle=False)["c2w"].copy()
     c2w[:, :3, 3] = k * (c2w[:, :3, 3] - shift)
@@ -57,7 +69,7 @@ def run(ws: Workspace, cfg: Config) -> None:
         splat_center=[float(v) for v in center],
         spawn=manifest.spawn_from_camera(c2w[spawn_cam]),
         eye_height=eye,
-        splat_path="res://assets/scene.splat",
+        splat_path=f"res://assets/{splat_name}",
         collision_path="res://assets/collision.glb",
         backdrop=manifest.backdrop(rgba, obstacles, mesh_colors),
     )

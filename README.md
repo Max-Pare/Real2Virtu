@@ -146,7 +146,7 @@ For LiDAR scans the same tips hold, and: stay within about 4 m of the surfaces y
 
 ## Controls in the exported game
 
-WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. `R` returns to the start point. Esc frees the mouse.
+WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. `R` returns to the start point. Mouse wheel zooms (narrows the field of view), middle click resets it. Esc frees the mouse.
 
 The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's default engine wedges the player on the edges of scanned triangle meshes. If the walker is still blocked in every direction it frees itself: a small step up when that clears the obstacle, otherwise back to the last place where walking worked.
 
@@ -155,10 +155,14 @@ The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's defa
 ```
 out/flat/
   project.godot, main.tscn, player/, scripts/
-  assets/scene.splat      Gaussians, Y-up, metres
+  assets/scene.ply        Gaussians with view-dependent colour, Y-up, metres
   assets/collision.glb    collision proxy with vertex colours; also shown behind the splat
   scene.json              manifest the Godot scene is built from; `backdrop` says what fills gaps, `objects` is reserved for interactables
 ```
+
+The splat is exported as a PLY with view-dependent colour. The compact `.splat` format used before holds base colour only; on a 5 minute scan that cost 3.5 dB PSNR against the photos (22.16 to 18.66 dB, measured with `tools/eval_render.py`). The PLY is about 250 bytes per Gaussian, and Godot's first import takes longer (79 s for 900,000 Gaussians).
+
+`tools/eval_render.py <workspace>` renders a finished scan from its training cameras, prints PSNR against the photos with full and with base colour, and writes side-by-side pictures to `<workspace>/eval`.
 
 ## Tests
 
