@@ -21,14 +21,30 @@ from pathlib import Path
 _done = False
 
 
+def find_vcvars() -> str | None:
+    """vcvars64.bat of a Visual Studio that the CUDA 12 toolkit accepts, or None.
+
+    nvcc from CUDA 12.x refuses compilers newer than Visual Studio 2022, so a
+    newer Visual Studio installed next to it must not be picked.
+    """
+    for year in ("2022", "2019", "2017"):
+        hits = sorted(glob.glob(
+            rf"C:\Program Files*\Microsoft Visual Studio\{year}\*\VC\Auxiliary\Build\vcvars64.bat"))
+        if hits:
+            return hits[-1]
+    return None
+
+
 def _load_msvc_env() -> None:
     if shutil.which("cl"):
         return
-    hits = sorted(glob.glob(
-        r"C:\Program Files*\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvars64.bat"))
-    if not hits:
-        return  # gsplat will report the missing compiler itself
-    out = subprocess.run(f'"{hits[-1]}" >nul 2>&1 && set', shell=True,
+    vcvars = find_vcvars()
+    if vcvars is None:
+        raise SystemExit(
+            "gsplat needs the Visual Studio 2022 C++ compiler to build (CUDA 12 does not accept "
+            "newer versions).\nRun setup.bat, or install 'Visual Studio Build Tools 2022' with the "
+            "C++ workload; it installs next to other versions.")
+    out = subprocess.run(f'"{vcvars}" >nul 2>&1 && set', shell=True,
                          capture_output=True, text=True).stdout
     for line in out.splitlines():
         key, sep, value = line.partition("=")

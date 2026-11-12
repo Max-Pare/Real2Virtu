@@ -8,7 +8,7 @@ import sys
 import torch
 
 from r2v.cli import LOCAL_COLMAP, _winget_exe
-from r2v.gsplat_compat import CUDA_TOOLKIT_GLOB, find_cuda_toolkit
+from r2v.gsplat_compat import CUDA_TOOLKIT_GLOB, find_cuda_toolkit, find_vcvars
 
 
 def show(name, ok, detail=""):
@@ -22,8 +22,8 @@ show("ffmpeg", bool(ff), ff or "")
 show("COLMAP", LOCAL_COLMAP.exists(), str(LOCAL_COLMAP))
 godot = _winget_exe("GodotEngine.GodotEngine*", "Godot*_console.exe")
 show("Godot", bool(godot), godot or "")
-vc = glob.glob(r"C:\Program Files*\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvars64.bat")
-show("MSVC", bool(vc), vc[-1] if vc else "")
+vc = find_vcvars()
+show("MSVC", bool(vc), vc or "need Visual Studio 2022 C++ tools (CUDA 12 rejects newer)")
 cuda = find_cuda_toolkit(torch.version.cuda)
 installed = ", ".join(sorted(glob.glob(CUDA_TOOLKIT_GLOB))) or "none"
 show("CUDA toolkit", bool(cuda),

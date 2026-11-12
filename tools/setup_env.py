@@ -36,7 +36,8 @@ COLMAP_VERSION = "4.2.1"
 COLMAP_URL = f"https://github.com/colmap/colmap/releases/download/{COLMAP_VERSION}/colmap-x64-windows-cuda.zip"
 COLMAP_SHA256 = "e9c5cbd84c2ea986d2e970a2473fc2d2e6b34a2cdcf5d3df2765c319a63af881"
 
-VCVARS_GLOB = r"C:\Program Files*\Microsoft Visual Studio\*\*\VC\Auxiliary\Build\vcvars64.bat"
+# 2022 exactly: nvcc from CUDA 12.8 refuses newer Visual Studio versions.
+VCVARS_GLOB = r"C:\Program Files*\Microsoft Visual Studio\2022\*\VC\Auxiliary\Build\vcvars64.bat"
 CUDA_GLOB = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.8*"
 
 failed: list[str] = []
@@ -139,7 +140,7 @@ def step_system() -> None:
     # gsplat compiles its CUDA code on first use: needs the C++ compiler and the
     # CUDA Toolkit matching the torch build (cu128).
     winget_install(
-        "Visual Studio Build Tools (C++)",
+        "Visual Studio Build Tools 2022 (C++)",
         bool(glob.glob(VCVARS_GLOB)),
         ["--id", "Microsoft.VisualStudio.2022.BuildTools", "--override",
          "--passive --wait --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"])
