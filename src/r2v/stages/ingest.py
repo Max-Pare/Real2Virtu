@@ -100,6 +100,11 @@ def thin(points: np.ndarray, colors: np.ndarray, voxel: float) -> tuple[np.ndarr
     return points[idx], colors[idx]
 
 
+def slot_length(video_fps: float, keep_fps: float) -> int:
+    """Video frames per kept frame; the sharpest of each such run is kept."""
+    return max(1, int(round(video_fps / keep_fps)))
+
+
 def read_depth(scan: Path, frame: int, min_conf: int, lo: float, hi: float) -> np.ndarray | None:
     """Depth in millimetres (uint16); 0 where the sensor was unsure or out of range."""
     d = cv2.imread(str(Path(scan) / "depth" / f"{frame:06d}.png"), cv2.IMREAD_UNCHANGED)
@@ -127,7 +132,7 @@ def run(ws: Workspace, cfg: Config) -> None:
         raise SystemExit(f"ingest: cannot open {scan / 'rgb.mp4'}")
     cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # poses and intrinsics refer to the stored frame
     video_fps = cap.get(cv2.CAP_PROP_FPS) or 60.0
-    stride = max(1, int(round(video_fps / (c.fps * c.keep_one_in))))
+    slot = slot_length(video_fps, c.fps)
 
     d = ws.reset("ingest")
     (d / "images").mkdir()
@@ -137,11 +142,11 @@ def run(ws: Workspace, cfg: Config) -> None:
     last_pose = None
     seen = still = no_depth = 0
 
-    def flush(group):
+    def flush(best):
         nonlocal last_pose, pts, cols, still, no_depth
-        if not group:
+        if best is None:
             return
-        _, frame_no, bgr = max(group, key=lambda g: g[0])
+        _, frame_no, bgr = best
         c2w, K = odo[frame_no]
         if last_pose is not None and not moved(last_pose, c2w, c.min_move, c.min_turn_deg):
             still += 1
@@ -177,31 +182,32 @@ def run(ws: Workspace, cfg: Config) -> None:
         if len(pts) > 4 * c.max_points:
             pts, cols = thin(pts, cols, c.voxel)
 
-    group, frame_no = [], 0
+    # Every video frame is decoded and the sharpest of each slot is kept: the phone
+    # sets exposure itself, so many frames are blurred by camera motion, and a 60 fps
+    # video offers 30 candidates per kept frame at 2 fps.
+    best, frame_no = None, 0
     while True:
-        if frame_no % stride:
-            if not cap.grab():
-                break
-        else:
-            ok, bgr = cap.read()
-            if not ok:
-                break
-            if frame_no in odo:
-                seen += 1
-                group.append((sharpness_of(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)), frame_no, bgr))
-            if len(group) == c.keep_one_in:
-                flush(group)
-                group = []
+        ok, bgr = cap.read()
+        if not ok:
+            break
+        if frame_no in odo:
+            seen += 1
+            score = sharpness_of(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY))
+            if best is None or score > best[0]:
+                best = (score, frame_no, bgr)
         frame_no += 1
-    flush(group)
+        if frame_no % slot == 0:
+            flush(best)
+            best = None
+    flush(best)
     cap.release()
 
     pts, cols = thin(pts, cols, c.voxel)
     if len(pts) > c.max_points:
         idx = np.random.default_rng(0).choice(len(pts), c.max_points, replace=False)
         pts, cols = pts[idx], cols[idx]
-    print(f"ingest: {scan} -> {len(names)} frames kept of {frame_no} "
-          f"({still} dropped: camera not moving; {no_depth} without depth), {len(pts)} start points")
+    print(f"ingest: {scan} -> {len(names)} frames kept of {frame_no} (sharpest of each {slot}; "
+          f"{still} dropped: camera not moving; {no_depth} without depth), {len(pts)} start points")
     if len(names) < 20:
         raise SystemExit(f"ingest: only {len(names)} frames; scan too short, or raise --fps")
 

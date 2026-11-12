@@ -112,6 +112,12 @@ Stages: `ingest`, `align`, `splat`, `clean`, `collision`, `export`. COLMAP and f
 
 Camera poses are refined slightly during training, because ARKit tracking drifts by a few centimetres.
 
+Frame choice: the app gives no control over exposure, so frames taken while the phone turns are blurred. `ingest` decodes every video frame and keeps the sharpest of each slot (30 candidates per kept frame for a 60 fps video at the default 2 per second). On a 230 s scan this raised the median sharpness of the kept frames by 30% against choosing from 3 candidates, and took 2.8 minutes. Its effect on the trained result has not been measured.
+
+Exposure: the phone also changes exposure and white balance while filming. Training learns one colour gain per frame (both capture paths), so those changes are not baked into the scene as brightness patches; the scene is stored at the average exposure and the gains are saved as `exposure_gain.npy` in the `splat` stage folder. Not yet run on a real scan.
+
+Large scans: the opacity and size regularisers apply only to the Gaussians the current frame sees. Applied to all of them, Gaussians that are out of view most of the time faded out and were relocated in bulk; on a 230 s scan with `--cap 4000000` half of them were dead by step 5500. Checked up to step 8000 of that run, not to the end.
+
 Training size follows the scan: about 150 passes over the kept frames (6000 to 20000 steps) and 3 Gaussians per start point (300k to 1.5M). Dense start points fill the Gaussian budget early, so a short scan trained with the full budget takes several times longer for no gain. `--steps` and `--cap` override this.
 
 Limits: one scan per build (separate scans do not share a coordinate frame). LiDAR reaches about 4.5 m; surfaces further away are learned from colour only. Use a separate workspace folder per capture.

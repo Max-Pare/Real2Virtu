@@ -168,3 +168,11 @@ def test_stage_list_follows_source():
     assert cli.stages_for("lidar") == ["ingest", "align", "splat", "clean", "collision", "export"]
     assert cli.stages_for("video")[3:] == ["splat", "clean", "collision", "export"]
     assert cli.stages_for("video")[:2] == ["frames", "poses"]
+
+
+def test_slot_length_covers_every_video_frame_between_kept_frames():
+    from r2v.stages.ingest import slot_length
+
+    assert slot_length(60.0, 2.0) == 30
+    assert slot_length(60.0, 3.0) == 20
+    assert slot_length(30.0, 60.0) == 1

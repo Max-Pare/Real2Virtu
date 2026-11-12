@@ -70,6 +70,16 @@ def visible_mask(radii):
     return drawn.any(dim=0)
 
 
+def exposure_gain(log_gain, i: int):
+    """[3] colour gain of frame `i` from the learned table `log_gain` [n,3].
+
+    Gains are taken relative to the average frame, so the table cannot drift as a
+    whole (a darker scene with every gain raised would fit the photos equally well).
+    The average is held constant in the gradient: only frame `i` is updated.
+    """
+    return (log_gain[i] - log_gain.mean(dim=0).detach()).exp()
+
+
 def pose_delta_matrix(delta):
     """[6] (rotation vector, translation) -> [4,4] rigid transform; zeros give identity."""
     import torch
@@ -222,6 +232,12 @@ def run(ws: Workspace, cfg: Config) -> None:
         pose_opt = torch.optim.Adam([pose_delta], lr=c.pose_lr, weight_decay=1e-6)
         pose_sched = torch.optim.lr_scheduler.ExponentialLR(pose_opt, gamma=0.01 ** (1.0 / steps))
 
+    # Auto exposure and white balance differ per frame; let each frame have its own gain.
+    log_gain = gain_opt = None
+    if c.exposure_opt:
+        log_gain = torch.nn.Parameter(torch.zeros(len(images), 3, device=device))
+        gain_opt = torch.optim.Adam([log_gain], lr=c.exposure_lr)
+
     strategy = MCMCStrategy(cap_max=cap, refine_start_iter=500,
                             refine_stop_iter=int(steps * 0.83), refine_every=100)
     strategy.check_sanity(params, optimizers)
@@ -246,6 +262,8 @@ def run(ws: Workspace, cfg: Config) -> None:
             d_err = depth_loss(d_render, depths[i].to(device).float() * depth_unit)
         strategy.step_pre_backward(params, optimizers, state, step, info)
 
+        if log_gain is not None:
+            img = img * exposure_gain(log_gain, i)
         l1 = (img - gt).abs().mean()
         ssim = _ssim(img.permute(2, 0, 1), gt.permute(2, 0, 1))
         loss = (1 - c.ssim_weight) * l1 + c.ssim_weight * (1 - ssim)
@@ -270,6 +288,9 @@ def run(ws: Workspace, cfg: Config) -> None:
             pose_opt.step()
             pose_opt.zero_grad(set_to_none=True)
             pose_sched.step()
+        if gain_opt is not None:
+            gain_opt.step()
+            gain_opt.zero_grad(set_to_none=True)
         strategy.step_post_backward(params, optimizers, state, step, info,
                                     lr=sched.get_last_lr()[0])
 
@@ -293,6 +314,14 @@ def run(ws: Workspace, cfg: Config) -> None:
         with torch.no_grad():
             refined = torch.stack([c2w[i] @ pose_delta_matrix(pose_delta[i]) for i in range(n)])
         np.save(d / "refined_c2w.npy", refined.cpu().numpy())
+    if log_gain is not None:
+        # Per frame and colour channel, relative to the average frame; the splat itself
+        # holds the scene at that average exposure.
+        with torch.no_grad():
+            gains = (log_gain - log_gain.mean(dim=0)).exp().cpu().numpy()
+        np.save(d / "exposure_gain.npy", gains)
+        print(f"splat: learned frame gains {gains.min():.2f} to {gains.max():.2f} "
+              f"(1 = average exposure)", flush=True)
     out = {k: v.detach().cpu() for k, v in params.items()}
     torch.save(out, d / "ckpt.pt")
     arr = {k: v.numpy() for k, v in out.items()}
