@@ -18,7 +18,26 @@ Not yet compared: video path against LiDAR path on the same capture.
 
 Known limits: one floor level only (a flat safety floor sits at the aligned floor height); scale needs `--ceiling-height` or `--scale`.
 
+## Setup on a new machine (Windows)
+
+```
+.\setup.bat
+```
+
+Needs an NVIDIA GPU with a current driver, and `winget`. It installs, skipping whatever is already there:
+
+- a signed Python 3.12.10 from python.org in `tools\python312_signed` (unsigned Python builds get blocked by Windows Smart App Control);
+- `uv`, then `.venv` with the packages recorded in `uv.lock`;
+- ffmpeg, Godot, Visual Studio Build Tools (C++ workload) and CUDA Toolkit 12.8 through winget (large downloads; Windows asks for administrator rights);
+- COLMAP 4.2.1 (CUDA build) in `tools\colmap`.
+
+It ends with `tools\check_env.py`, which lists what is found. `--skip-system` leaves out the winget installs, `--skip-colmap` leaves out COLMAP (only the video path uses it). Downloads are checked against fixed SHA-256 values.
+
+Run the tool as `.venv\Scripts\r2v.exe`. That launcher is generated on each machine and unsigned, so Smart App Control may block it; `.venv\Scripts\python.exe -m r2v` does the same and is not affected.
+
 ## Requirements
+
+What the setup script provides, for installing by hand:
 
 - Python 3.11 or 3.12 (`uv sync --extra gpu --extra dev`); RTX 50-series needs a CUDA 12.8+ torch build
 - gsplat compiles its CUDA code on first use (about 80 s): needs Visual Studio Build Tools (C++ workload) and the CUDA Toolkit matching torch. `src/r2v/gsplat_compat.py` loads that environment and works around two Windows build problems, so a plain shell is enough

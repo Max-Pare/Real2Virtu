@@ -13,3 +13,4 @@ out/
 # Local toolchain (Python, COLMAP, compiled gsplat cache); keep the env check script
 tools/*
 !tools/check_env.py
+!tools/setup_env.py
