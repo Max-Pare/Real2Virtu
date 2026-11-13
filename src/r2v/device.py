@@ -55,4 +55,12 @@ def resolve(choice: str = "auto"):
     if not _announced:
         _announced = True
         print(f"device: {_LABEL[backend]}, {torch.cuda.get_device_name(0)}", flush=True)
+        if backend == "rocm":
+            from . import gsplat_compat
+            if gsplat_compat.rocm_runtime:
+                print(f"device: ROCm runtime {gsplat_compat.rocm_runtime}", flush=True)
+            else:
+                print("device: using the ROCm runtime inside the torch package, with which this "
+                      "pipeline has crashed at random; see 'AMD Radeon on Linux' in the README",
+                      flush=True)
     return torch.device("cuda")

@@ -18,6 +18,8 @@ import os
 import sys
 from pathlib import Path
 
+import r2v  # noqa: F401  before torch: prepares the process for torch on AMD
+
 import cv2
 import numpy as np
 import torch

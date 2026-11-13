@@ -5,6 +5,8 @@ import glob
 import shutil
 import sys
 
+import r2v  # noqa: F401  before torch: prepares the process for torch on AMD
+
 import torch
 
 from r2v.cli import LOCAL_COLMAP, _winget_exe

@@ -11,14 +11,19 @@ use. On Windows that needs three fixes, all applied to this process only:
 """
 from __future__ import annotations
 
+import ctypes
 import glob
+import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 _done = False
+# Path of the ROCm runtime loaded by use_system_rocm_runtime(); None: torch uses its own.
+rocm_runtime: str | None = None
 
 
 def find_vcvars() -> str | None:
@@ -117,6 +122,57 @@ def point_to_gpu_id_table() -> None:
     table = Path("/usr/share/libdrm")
     if (table / "amdgpu.ids").exists():
         os.environ.setdefault("AMDGPU_ASIC_ID_TABLE_PATHS", str(table))
+
+
+def use_system_rocm_runtime() -> str | None:
+    """AMD on Linux: make torch use the installed ROCm runtime instead of its own copy.
+
+    The ROCm torch wheel ships its own libhsa-runtime64.so (ROCR, the layer between
+    HIP and the kernel driver). With the one in the rocm7.2 wheel (build
+    1.18.0-rocm-rel-7.2-81), processes segfaulted at random places after GPU work:
+    in its own event thread (rocr::core::Runtime::AsyncEventsLoop), in malloc, in
+    Python's garbage collector. A build with 30,000 training steps crashed in the
+    stage after training 3 times out of 3, and a 20 second torch-only test 16 times
+    out of 16. With the distribution's runtime (hsa-rocr 7.2.4) loaded first: 0 of 2
+    and 0 of 11.
+
+    Loading the installed library with global symbols before torch makes torch's HIP
+    library bind to it. Must run before torch is imported, so r2v/__init__ calls it;
+    a script that imports torch first gets torch's own copy. Skipped when the
+    installed ROCm and the wheel differ in major.minor version.
+    R2V_ROCM_RUNTIME=bundled turns it off. Returns the path loaded, or None.
+    """
+    global rocm_runtime
+    if rocm_runtime is not None:
+        return rocm_runtime
+    if sys.platform != "linux" or os.environ.get("R2V_ROCM_RUNTIME", "").lower() == "bundled":
+        return None
+    if "torch" in sys.modules:
+        return None  # too late: torch has bound to its own copy
+    try:
+        spec = importlib.util.find_spec("torch")
+    except (ImportError, ValueError):
+        return None
+    if spec is None or not spec.origin:
+        return None
+    torch_dir = Path(spec.origin).parent
+    if not (torch_dir / "lib" / "libhsa-runtime64.so").exists():
+        return None  # not a ROCm build of torch
+    rocm_lib = Path(os.environ.get("ROCM_PATH") or "/opt/rocm") / "lib"
+    system = rocm_lib / "libhsa-runtime64.so.1"
+    if not system.exists():
+        return None
+    wheel = re.search(r"^hip\b[^=]*=\s*'(\d+)\.(\d+)", (torch_dir / "version.py").read_text(), re.M)
+    installed = {tuple(m.groups()) for m in
+                 (re.match(r"libamdhip64\.so\.(\d+)\.(\d+)\.", p.name) for p in rocm_lib.glob("libamdhip64.so.*.*.*")) if m}
+    if not wheel or tuple(wheel.groups()) not in installed:
+        return None
+    try:
+        ctypes.CDLL(str(system), mode=ctypes.RTLD_GLOBAL)
+    except OSError:
+        return None
+    rocm_runtime = str(system)
+    return rocm_runtime
 
 
 def prepare() -> None:
