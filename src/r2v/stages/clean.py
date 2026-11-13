@@ -15,6 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
+from .. import device as device_mod
 from .. import splat_io
 from ..config import Config
 from ..workspace import Workspace
@@ -194,7 +195,7 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     lidar = "depth_names" in scene
     if lidar and (c.carve or c.fill):
-        device = splat._require_cuda()
+        device = device_mod.resolve(cfg.device)
         depths, Ks, c2ws = _lidar_views(ws, scene, device)
 
     if lidar and c.carve:

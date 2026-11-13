@@ -6,19 +6,13 @@ import time
 
 import numpy as np
 
+from .. import device as device_mod
 from .. import gsplat_compat, splat_io
 from ..config import Config
 from ..workspace import Workspace
 from . import ingest, poses
 
 PARAM_NAMES = ["means", "scales", "quats", "opacities", "sh0", "shN"]
-
-
-def _require_cuda():
-    import torch
-    if not torch.cuda.is_available():
-        raise SystemExit("splat: CUDA not available; install a CUDA build of torch")
-    return torch.device("cuda")
 
 
 def load_scene(ws: Workspace) -> dict:
@@ -171,7 +165,7 @@ def run(ws: Workspace, cfg: Config) -> None:
     from gsplat.strategy import MCMCStrategy
 
     c = cfg.splat
-    device = _require_cuda()
+    device = device_mod.resolve(cfg.device)
     torch.manual_seed(c.seed)
     scene = load_scene(ws)
     lidar = "source" in scene and str(scene["source"]) == "lidar"

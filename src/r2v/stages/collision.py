@@ -10,6 +10,7 @@ import math
 
 import numpy as np
 
+from .. import device as device_mod
 from ..config import Config
 from ..workspace import Workspace
 from . import clean, splat
@@ -83,7 +84,7 @@ def run(ws: Workspace, cfg: Config) -> None:
     import trimesh
 
     c = cfg.collision
-    device = splat._require_cuda()
+    device = device_mod.resolve(cfg.device)
     scene = splat.load_scene(ws)
     params = clean.load_params(ws, device)
 

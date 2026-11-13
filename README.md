@@ -79,6 +79,8 @@ r2v build kitchen.mp4 hallway.mp4 --out out/flat --ceiling-height 2.65
 Stages run in order and are cached in `workspace/`: `frames`, `poses`, `align`, `splat`, `clean`, `collision`, `export`.
 Re-run one stage with `--only <stage>`; ignore the cache with `--force`.
 
+GPU backend: `--device auto` (default) uses whichever backend the installed torch was built for, NVIDIA CUDA (`--extra gpu`) or AMD ROCm (`--extra amd`), and prints it. `--device cuda` or `--device rocm` (or `R2V_DEVICE`) insists on one and stops if the install is the other. There is no CPU mode.
+
 Short clips: the default keeps 2 frames per second. Raise it with `--fps` when the video is under a minute (about 100 to 300 frames in total works well).
 
 ### Training speed

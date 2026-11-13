@@ -14,6 +14,7 @@ Reading the result:
   both look bad                           -> training or the capture is the limit
 These are views the splat was trained on. Away from the walked path it looks worse.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ import cv2
 import numpy as np
 import torch
 
+from r2v import device
 from r2v.stages import ingest, poses, splat
 from r2v.workspace import Workspace
 
@@ -31,7 +33,7 @@ def main() -> None:
     if len(sys.argv) != 2:
         raise SystemExit(__doc__)
     ws = Workspace(Path(sys.argv[1]))
-    dev = torch.device("cuda")
+    dev = device.resolve(os.environ.get("R2V_DEVICE", "auto"))
     scene = splat.load_scene(ws)
     lidar = "source" in scene and str(scene["source"]) == "lidar"
     img_dir = ingest.images(ws) if lidar else poses.undistorted_images(ws)

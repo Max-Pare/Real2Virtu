@@ -8,6 +8,7 @@ import sys
 import torch
 
 from r2v.cli import LOCAL_COLMAP, _winget_exe
+from r2v.device import gpu_backend
 from r2v.gsplat_compat import CUDA_TOOLKIT_GLOB, find_cuda_toolkit, find_vcvars
 
 
@@ -16,7 +17,7 @@ def show(name, ok, detail=""):
 
 
 show("python", True, sys.base_prefix)
-show("torch CUDA", torch.cuda.is_available(), torch.__version__)
+show(f"torch GPU ({gpu_backend() or 'CPU-only build'})", torch.cuda.is_available(), torch.__version__)
 ff = shutil.which("ffmpeg") or _winget_exe("Gyan.FFmpeg*", "ffmpeg.exe")
 show("ffmpeg", bool(ff), ff or "")
 show("COLMAP", LOCAL_COLMAP.exists(), str(LOCAL_COLMAP))

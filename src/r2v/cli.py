@@ -11,6 +11,7 @@ from typing import Optional
 import typer
 
 from .config import Config
+from .device import CHOICES as DEVICES
 from .workspace import Workspace, file_fingerprint, make_key
 
 app = typer.Typer(add_completion=False, help=__doc__)
@@ -70,6 +71,7 @@ def build(
     vocab_tree: Optional[Path] = typer.Option(None, help="COLMAP vocab tree for loop closure."),
     only: Optional[str] = typer.Option(None, help=f"Run a single stage: ingest, {', '.join(STAGES)}."),
     force: bool = typer.Option(False, help="Ignore the cache."),
+    device: str = typer.Option("auto", envvar="R2V_DEVICE", help="Processor for the splat, clean and collision stages: auto (whichever the installed torch was built for), cuda (NVIDIA) or rocm (AMD Radeon)."),
 ) -> None:
     """Run the pipeline. Finished stages are skipped unless their inputs changed."""
     if lidar and videos:
@@ -81,7 +83,9 @@ def build(
     if only and only not in stage_list:
         raise SystemExit(f"unknown stage '{only}'; choose from {', '.join(stage_list)}")
 
-    cfg = Config(source=source)
+    if device not in DEVICES:
+        raise SystemExit(f"unknown device '{device}'; choose from {', '.join(DEVICES)}")
+    cfg = Config(source=source, device=device)
     cfg.frames.videos = [str(v) for v in videos or []]
     cfg.frames.ffmpeg = ffmpeg
     cfg.frames.extract_fps = fps * cfg.frames.keep_one_in

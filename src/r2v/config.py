@@ -116,6 +116,9 @@ class ExportCfg:
 @dataclass
 class Config:
     source: str = "video"  # "video" (frames + poses) or "lidar" (ingest)
+    # "auto", "cuda" or "rocm" (see device.py). Not part of any stage's group:
+    # changing it does not re-run finished stages.
+    device: str = "auto"
     ingest: IngestCfg = field(default_factory=IngestCfg)
     frames: FramesCfg = field(default_factory=FramesCfg)
     poses: PosesCfg = field(default_factory=PosesCfg)
