@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from r2v.stages.splat import visible_mask
@@ -25,3 +26,38 @@ def test_exposure_gain_is_relative_to_the_average_frame():
     # Only the frame in use receives a gradient.
     exposure_gain(table, 2).sum().backward()
     assert table.grad[:2].abs().sum() == 0 and table.grad[2].abs().sum() > 0
+
+
+def test_loss_without_convolutions_matches_the_convolution_one():
+    from r2v.stages.splat import _photo_loss_conv, _photo_loss_shifted
+
+    g = torch.Generator().manual_seed(0)
+    gt = torch.rand(37, 52, 3, generator=g)
+    img = (gt + 0.2 * torch.randn(37, 52, 3, generator=g)).requires_grad_()
+    want = _photo_loss_conv(img, gt, 0.2)
+    got = _photo_loss_shifted(img, gt, 0.2)
+    assert abs(float(want) - float(got)) < 1e-6
+    g_want, = torch.autograd.grad(want, img)
+    g_got, = torch.autograd.grad(got, img)
+    assert (g_want - g_got).abs().max() < 1e-7 + 1e-4 * g_want.abs().max()
+
+
+def test_rocm_loss_on_the_gpu_matches_the_cpu_reference():
+    """The compiled loss the AMD path trains with, against the plain one on the CPU."""
+    from r2v import device
+    from r2v.stages.splat import _photo_loss_conv, make_photo_loss
+
+    if device.gpu_backend() != "rocm" or not torch.cuda.is_available():
+        pytest.skip("AMD ROCm only")
+    g = torch.Generator().manual_seed(1)
+    gt = torch.rand(120, 160, 3, generator=g)
+    img = (gt + 0.2 * torch.randn(120, 160, 3, generator=g)).requires_grad_()
+    want = _photo_loss_conv(img, gt, 0.2)
+    g_want, = torch.autograd.grad(want, img)
+    loss = make_photo_loss("rocm")
+    img_gpu = img.detach().cuda().requires_grad_()
+    for _ in range(2):   # second call: the compiled kernels, not the compile itself
+        got = loss(img_gpu, gt.cuda(), 0.2)
+        g_got, = torch.autograd.grad(got, img_gpu)
+    assert abs(float(want) - float(got)) < 1e-5
+    assert (g_want - g_got.cpu()).abs().max() < 1e-7 + 1e-3 * g_want.abs().max()

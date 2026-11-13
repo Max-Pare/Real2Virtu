@@ -110,6 +110,115 @@ def _ssim(a, b):
     return s.mean()
 
 
+def _photo_loss_conv(img, gt, ssim_weight: float):
+    """(1 - w) L1 + w (1 - SSIM) of two [H,W,3] images."""
+    l1 = (img - gt).abs().mean()
+    return (1 - ssim_weight) * l1 + ssim_weight * (1 - _ssim(img.permute(2, 0, 1), gt.permute(2, 0, 1)))
+
+
+_WINDOW = [math.exp(-(k - 5.0) ** 2 / (2 * 1.5 ** 2)) for k in range(11)]
+_WINDOW = [v / sum(_WINDOW) for v in _WINDOW]
+
+
+def _blur_shifted(x):
+    """The 11 px Gaussian blur of `_ssim` (zero padding) as weighted sums of shifted
+    copies, one pass per axis: no convolution."""
+    import torch.nn.functional as F
+
+    h, w = x.shape[-2:]
+    p = F.pad(x, (5, 5, 0, 0))
+    y = _WINDOW[0] * p[..., :, 0:w]
+    for k in range(1, 11):
+        y = y + _WINDOW[k] * p[..., :, k:k + w]
+    p = F.pad(y, (0, 0, 5, 5))
+    z = _WINDOW[0] * p[..., 0:h, :]
+    for k in range(1, 11):
+        z = z + _WINDOW[k] * p[..., k:k + h, :]
+    return z
+
+
+def _photo_loss_shifted(img, gt, ssim_weight: float):
+    """`_photo_loss_conv` without convolutions; same value and gradient."""
+    import torch
+
+    l1 = (img - gt).abs().mean()
+    a, b = img.permute(2, 0, 1), gt.permute(2, 0, 1)
+    x = _blur_shifted(torch.cat([a, b, a * a, b * b, a * b]))
+    mu_a, mu_b, aa, bb, ab = x[0:3], x[3:6], x[6:9], x[9:12], x[12:15]
+    var_a, var_b, cov = aa - mu_a ** 2, bb - mu_b ** 2, ab - mu_a * mu_b
+    c1, c2 = 0.01 ** 2, 0.03 ** 2
+    s = ((2 * mu_a * mu_b + c1) * (2 * cov + c2)) / ((mu_a ** 2 + mu_b ** 2 + c1) * (var_a + var_b + c2))
+    return (1 - ssim_weight) * l1 + ssim_weight * (1 - s.mean())
+
+
+def make_photo_loss(backend: str):
+    """The image loss for a GPU backend: a function (img, gt, ssim_weight) -> scalar.
+
+    NVIDIA: the SSIM blur is a convolution. AMD ROCm: convolutions run in AMD's MIOpen
+    library, which is slow here (2 to 3 ms per blur, and SSIM needs five, plus their
+    gradients). So the blur is written without convolutions and compiled into a few
+    GPU kernels by torch.compile (7 times faster than the convolution on an RX 7800 XT).
+    Uncompiled it still works, but slower than the convolution; used when compiling fails.
+    """
+    if backend != "rocm":
+        return _photo_loss_conv
+    import os
+    from pathlib import Path
+
+    import torch
+
+    # Compiled kernels are kept inside the project; the default is under /tmp, which
+    # is emptied on reboot (compiling takes about a minute, loading from here seconds).
+    cache = Path(__file__).resolve().parents[3] / "tools" / "torch_compile_cache"
+    os.environ.setdefault("TORCHINDUCTOR_CACHE_DIR", str(cache))
+    use = [torch.compile(_photo_loss_shifted)]
+
+    def photo_loss(img, gt, ssim_weight: float):
+        try:
+            return use[0](img, gt, ssim_weight)
+        except Exception as err:
+            if use[0] is _photo_loss_shifted:
+                raise
+            print(f"splat: could not compile the loss ({type(err).__name__}: {str(err)[:200]}); "
+                  f"running it uncompiled, which is slower", flush=True)
+            use[0] = _photo_loss_shifted
+            return use[0](img, gt, ssim_weight)
+
+    return photo_loss
+
+
+def position_noise(params, scaler: float) -> None:
+    """The MCMC strategy's random nudge of the Gaussian centres, in place.
+
+    Same result as gsplat's `inject_noise_to_position`, which multiplies each 3x3
+    covariance with its noise vector as a batched matrix product. On AMD (ROCm) that
+    one call took 19 ms for 1.5M Gaussians, a third of a training step; written
+    elementwise it takes 0.4 ms.
+    """
+    import torch
+    from gsplat import quat_scale_to_covar_preci
+
+    with torch.no_grad():
+        opacities = torch.sigmoid(params["opacities"].flatten())
+        covars, _ = quat_scale_to_covar_preci(params["quats"], torch.exp(params["scales"]),
+                                              compute_covar=True, compute_preci=False, triu=False)
+        # Only nearly transparent Gaussians move: the factor is 0.5 at 0.5% opacity
+        # and under 0.001 above 7%.
+        fade = 1 / (1 + torch.exp(-100 * ((1 - opacities) - 0.995)))
+        noise = torch.randn_like(params["means"]) * fade[:, None] * scaler
+        params["means"].add_((covars * noise[:, None, :]).sum(dim=-1))
+
+
+def _use_fast_position_noise() -> None:
+    """Point gsplat's MCMC strategy at `position_noise`. Left alone when gsplat's
+    layout differs from the versions this was written for (1.4 to 1.5)."""
+    from gsplat.strategy import mcmc
+
+    if hasattr(mcmc, "inject_noise_to_position"):
+        mcmc.inject_noise_to_position = (
+            lambda params, optimizers=None, state=None, scaler=1.0: position_noise(params, scaler))
+
+
 def auto_size(steps: int, cap: int, n_frames: int, n_points: int) -> tuple[int, int]:
     """Smaller budget for small captures; `steps` and `cap` are upper limits.
 
@@ -213,8 +322,11 @@ def run(ws: Workspace, cfg: Config) -> None:
 
     lrs = {"means": 1.6e-4 * scene_scale, "scales": 5e-3, "quats": 1e-3,
            "opacities": 5e-2, "sh0": 2.5e-3, "shN": 2.5e-3 / 20}
+    # fused: one GPU kernel per update instead of a dozen small ones (halves the
+    # optimiser time at 1.5M Gaussians; same result).
     optimizers = {
-        name: torch.optim.Adam([{"params": params[name], "lr": lrs[name], "name": name}], eps=1e-15)
+        name: torch.optim.Adam([{"params": params[name], "lr": lrs[name], "name": name}],
+                               eps=1e-15, fused=True)
         for name in PARAM_NAMES
     }
     sched = torch.optim.lr_scheduler.ExponentialLR(optimizers["means"], gamma=0.01 ** (1.0 / steps))
@@ -232,10 +344,21 @@ def run(ws: Workspace, cfg: Config) -> None:
         log_gain = torch.nn.Parameter(torch.zeros(len(images), 3, device=device))
         gain_opt = torch.optim.Adam([log_gain], lr=c.exposure_lr)
 
+    _use_fast_position_noise()
     strategy = MCMCStrategy(cap_max=cap, refine_start_iter=500,
                             refine_stop_iter=int(steps * 0.83), refine_every=100)
     strategy.check_sanity(params, optimizers)
     state = strategy.initialize_state()
+
+    backend = device_mod.gpu_backend()
+    photo_loss = make_photo_loss(backend)
+    if backend == "rocm":
+        # First call compiles (or loads) the loss; keep that out of the step timing.
+        print("splat: preparing the loss for this GPU (10 s or more the first time)", flush=True)
+        h0, w0 = images[0].shape[:2]
+        probe = torch.full((h0, w0, 3), 0.5, device=device, requires_grad=True)
+        photo_loss(probe, torch.full((h0, w0, 3), 0.4, device=device), c.ssim_weight).backward()
+        del probe
 
     n = len(images)
     order = torch.randperm(n)
@@ -258,9 +381,7 @@ def run(ws: Workspace, cfg: Config) -> None:
 
         if log_gain is not None:
             img = img * exposure_gain(log_gain, i)
-        l1 = (img - gt).abs().mean()
-        ssim = _ssim(img.permute(2, 0, 1), gt.permute(2, 0, 1))
-        loss = (1 - c.ssim_weight) * l1 + c.ssim_weight * (1 - ssim)
+        loss = photo_loss(img, gt, c.ssim_weight)
         # Regularise only the Gaussians this frame sees. Over all of them, one that is
         # out of view gets nothing but the regulariser, and Adam turns that into a
         # full-size step: in a large scan, where each frame sees a small part, opacity

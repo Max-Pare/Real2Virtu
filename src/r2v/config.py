@@ -59,7 +59,10 @@ class SplatCfg:
     scale_reg: float = 0.01
     depth_weight: float = 0.2  # L1 against sensor depth; only used when the scene has depth maps
     pose_opt: bool = False     # learn a small correction per camera (on for LiDAR poses)
-    pose_lr: float = 5e-5
+    # 1e-3 gave +1.6 dB PSNR on held-out frames of a 6 minute room scan against the
+    # earlier 5e-5 (5e-4: +1.1, 2e-3: +1.45): ARKit poses are off by more than a small
+    # rate can correct in one training. The rate falls to 1% of this by the last step.
+    pose_lr: float = 1e-3
     # Learn one brightness and colour gain per frame. Phones change exposure and white
     # balance while filming; without this the changes are baked into the scene as patches.
     exposure_opt: bool = False  # off: on the first real scan it cost 19% of the kept Gaussians

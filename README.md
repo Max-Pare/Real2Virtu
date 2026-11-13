@@ -65,7 +65,15 @@ scripts/build_amd_gsplat.sh            # about 80 s; clones into tools/amd_gspla
 
 Verified on a synthetic box room (72 frames of 640x480, 3000 steps): training converges to 32.3 dB PSNR on the training views at about 20 steps per second, 0.5 GB peak VRAM; `clean`, `collision` and `export` run; the collision mesh matches the room within 8 cm; Godot 4.7.2 imports the project and the walk test reports no stuck positions. Not yet run on a real capture.
 
-Speed: the compiled rasteriser is fast (16 ms forward at 1600x1200 with 600k Gaussians), but the plain torch parts of a training step are slow on ROCm. A step at that load takes about 190 ms, against roughly 76 ms on the RTX 5060 in the table below. The time goes to the SSIM blur, the optimiser steps and the MCMC noise step; none of this has been tuned.
+Speed: the compiled rasteriser is fast, but three plain torch parts of a training step were slow on ROCm and have been replaced. Measured at 1.5M Gaussians and 800x600 frames, per step:
+
+| Part | Before | Now | Change |
+|---|---|---|---|
+| MCMC noise step | 19.3 ms | about 1 ms | gsplat's batched 3x3 matrix product written elementwise (same result) |
+| Optimisers | 12.0 ms | 6.3 ms | `fused=True` Adam (same result; used on NVIDIA too) |
+| Image loss and its gradient | 6.4 + 13.4 ms | 1.6 + 10.8 ms | SSIM blur without convolutions, compiled by `torch.compile` (same result; AMD only) |
+
+A 30,000 step training of a 6 minute LiDAR scan (626 frames, 1.5M Gaussians, `--train-scale 50`) went from 27.7 to 13.6 minutes. The loss is compiled on first use (about 10 s) and cached in `tools/torch_compile_cache`. Tried and rejected: gsplat's `SelectiveAdam` (17% faster, 0.34 dB worse), a coarse-to-fine resolution schedule (no gain), `packed` mode (slower).
 
 Open the exported project in the Godot editor once (or run `godot --headless --path <project> --import`) so the splat gets imported before the game runs.
 
@@ -135,7 +143,7 @@ Stages: `ingest`, `align`, `splat`, `clean`, `collision`, `export`. COLMAP and f
 - the up direction (ARKit's world is gravity-aligned);
 - depth maps, used for dense start points and as a depth term during training (`--depth-weight`, 0 turns it off). Blank walls and floors, where video alone finds nothing to track, get real geometry.
 
-Camera poses are refined slightly during training, because ARKit tracking drifts by a few centimetres.
+Camera poses are refined during training, because ARKit tracking is off by a few centimetres and about a degree. How fast they may move matters more than any other training setting tried: on a 6 minute room scan (15,000 steps, 600k Gaussians, scored on held-out frames) a pose learning rate of 1e-3 gave 20.77 dB PSNR against 19.16 dB at the earlier 5e-5 (5e-4: 20.28, 2e-3: 20.61). 1e-3 is now the default (`SplatCfg.pose_lr`). On the full run of that scan (30,000 steps, 1.5M Gaussians) PSNR against the training photos rose from 23.22 to 24.73 dB and the worst view from 13.44 to 17.68 dB. One scan only.
 
 Frame choice: the app gives no control over exposure, so frames taken while the phone turns are blurred. `ingest` decodes every video frame and keeps the sharpest of each slot (30 candidates per kept frame for a 60 fps video at the default 2 per second). On a 230 s scan this raised the median sharpness of the kept frames by 30% against choosing from 3 candidates, and took 2.8 minutes. Its effect on the trained result has not been measured.
 

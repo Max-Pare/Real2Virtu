@@ -102,3 +102,28 @@ def test_mcmc_relocation_runs():
     assert (new_opac <= opac + 1e-6).all() and (new_opac > 0).all()
     same = ratios == 1
     assert torch.allclose(new_opac[same], opac[same], atol=1e-5)
+
+
+def test_position_noise_matches_gsplat():
+    """r2v's elementwise MCMC noise step against gsplat's own, same random numbers."""
+    from gsplat.strategy.ops import inject_noise_to_position
+
+    from r2v.stages.splat import position_noise
+
+    def params():
+        g = torch.Generator().manual_seed(3)
+        return {"means": torch.randn(5000, 3, generator=g).cuda(),
+                "quats": torch.randn(5000, 4, generator=g).cuda(),
+                "scales": (torch.randn(5000, 3, generator=g) - 3).cuda(),
+                "opacities": (torch.randn(5000, generator=g) * 3 - 4).cuda()}
+
+    ours, theirs = params(), params()
+    before = ours["means"].clone()
+    torch.manual_seed(7)
+    position_noise(ours, scaler=40.0)
+    torch.manual_seed(7)
+    with torch.no_grad():
+        inject_noise_to_position(params=theirs, optimizers={}, state={}, scaler=40.0)
+    moved = (theirs["means"] - before).abs().max()
+    assert moved > 1e-3
+    assert (ours["means"] - theirs["means"]).abs().max() < 1e-5 * (1 + moved)
