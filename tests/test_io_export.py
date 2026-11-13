@@ -120,6 +120,37 @@ def test_export_writes_godot_project(tmp_path):
     assert np.allclose(m["splat"]["center"], 2.0 * (g["means"].mean(axis=0) - [0, 0.5, 0]), atol=1e-4)
 
 
+def test_export_prefers_the_full_colour_ply(tmp_path):
+    ws = Workspace(tmp_path / "ws")
+    g = _gaussians()
+    splat_io.write_splat(ws.dir("splat") / "scene.splat", g["means"], g["scales"], g["quats"],
+                         g["opacities"], g["sh0"])
+    splat_io.write_ply(ws.dir("splat") / "scene.ply", **g)
+    (ws.dir("collision") / "collision.glb").write_bytes(b"glTF")
+    (ws.dir("collision") / "refine.json").write_text('{"floor_shift": 0.5, "scale": 2.0}')
+    np.savez(ws.dir("align") / "scene.npz", c2w=np.eye(4)[None])
+    cfg = Config()
+    cfg.export.out = str(tmp_path / "game")
+    (tmp_path / "game" / "assets").mkdir(parents=True)
+    (tmp_path / "game" / "assets" / "scene.splat").write_bytes(b"left over from an older export")
+    export.run(ws, cfg)
+
+    out = tmp_path / "game"
+    m = manifest.read(out / "scene.json")
+    assert m["splat"]["path"] == "res://assets/scene.ply" and m["splat"]["format"] == "ply"
+    assert not (out / "assets/scene.splat").exists()
+    names, before = splat_io.read_ply(ws.dir("splat") / "scene.ply")
+    names2, after = splat_io.read_ply(out / "assets/scene.ply")
+    assert names == names2
+    col = {n: i for i, n in enumerate(names)}
+    xyz, sc = [col[k] for k in "xyz"], [col[f"scale_{i}"] for i in range(3)]
+    assert np.allclose(after[:, xyz], 2.0 * (before[:, xyz] - [0, 0.5, 0]), atol=1e-5)
+    assert np.allclose(np.exp(after[:, sc]), 2.0 * np.exp(before[:, sc]), rtol=1e-5)
+    rest = [i for i in range(len(names)) if i not in xyz + sc]
+    assert np.array_equal(after[:, rest], before[:, rest])  # colour, opacity, rotation untouched
+    assert np.allclose(m["splat"]["center"], 2.0 * (g["means"].mean(axis=0) - [0, 0.5, 0]), atol=1e-4)
+
+
 def test_dense_floor_pick_and_scale_correction():
     from r2v.config import AlignCfg
     from r2v.stages import collision

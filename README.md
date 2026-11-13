@@ -18,7 +18,26 @@ Not yet compared: video path against LiDAR path on the same capture.
 
 Known limits: one floor level only (a flat safety floor sits at the aligned floor height); scale needs `--ceiling-height` or `--scale`.
 
+## Setup on a new machine (Windows)
+
+```
+.\setup.bat
+```
+
+Needs an NVIDIA GPU with a current driver, and `winget`. It installs, skipping whatever is already there:
+
+- a signed Python 3.12.10 from python.org in `tools\python312_signed` (unsigned Python builds get blocked by Windows Smart App Control);
+- `uv`, then `.venv` with the packages recorded in `uv.lock`;
+- ffmpeg, Godot, Visual Studio Build Tools (C++ workload) and CUDA Toolkit 12.8 through winget (large downloads; Windows asks for administrator rights);
+- COLMAP 4.2.1 (CUDA build) in `tools\colmap`.
+
+It ends with `tools\check_env.py`, which lists what is found. `--skip-system` leaves out the winget installs, `--skip-colmap` leaves out COLMAP (only the video path uses it). Downloads are checked against fixed SHA-256 values.
+
+Run the tool as `.venv\Scripts\r2v.exe`. That launcher is generated on each machine and unsigned, so Smart App Control may block it; `.venv\Scripts\python.exe -m r2v` does the same and is not affected.
+
 ## Requirements
+
+What the setup script provides, for installing by hand:
 
 - Python 3.11 or 3.12 (`uv sync --extra gpu --extra dev`); RTX 50-series needs a CUDA 12.8+ torch build
 - gsplat compiles its CUDA code on first use (about 80 s): needs Visual Studio Build Tools (C++ workload) and the CUDA Toolkit matching torch. `src/r2v/gsplat_compat.py` loads that environment and works around two Windows build problems, so a plain shell is enough
@@ -115,6 +134,12 @@ Stages: `ingest`, `align`, `splat`, `clean`, `collision`, `export`. COLMAP and f
 
 Camera poses are refined slightly during training, because ARKit tracking drifts by a few centimetres.
 
+Frame choice: the app gives no control over exposure, so frames taken while the phone turns are blurred. `ingest` decodes every video frame and keeps the sharpest of each slot (30 candidates per kept frame for a 60 fps video at the default 2 per second). On a 230 s scan this raised the median sharpness of the kept frames by 30% against choosing from 3 candidates, and took 2.8 minutes. Its effect on the trained result has not been measured.
+
+Exposure: the phone also changes exposure and white balance while filming. `--exposure` (off by default) makes training learn one colour gain per frame, relative to the average frame, and saves the gains as `exposure_gain.npy` in the `splat` stage folder. Measured once, on a 5 minute multi-room scan (3M cap, 40,000 steps): with it, gains spread from 0.39 to 2.05 and 891,643 Gaussians survived cleanup; without it 1,095,559 did and the final loss was lower. Whether it removes brightness patches has not been judged by eye.
+
+Large scans: the opacity and size regularisers apply only to the Gaussians the current frame sees. Applied to all of them, Gaussians that are out of view most of the time faded out and were relocated in bulk; on a 230 s scan with `--cap 4000000` half of them were dead by step 5500. Checked up to step 8000 of that run, not to the end.
+
 Training size follows the scan: about 150 passes over the kept frames (6000 to 20000 steps) and 3 Gaussians per start point (300k to 1.5M). Dense start points fill the Gaussian budget early, so a short scan trained with the full budget takes several times longer for no gain. `--steps` and `--cap` override this.
 
 Limits: one scan per build (separate scans do not share a coordinate frame). LiDAR reaches about 4.5 m; surfaces further away are learned from colour only. Use a separate workspace folder per capture.
@@ -143,7 +168,7 @@ For LiDAR scans the same tips hold, and: stay within about 4 m of the surfaces y
 
 ## Controls in the exported game
 
-WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. `R` returns to the start point. Esc frees the mouse.
+WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` toggles fly mode: WASD moves where you look, Space/E up, Q/Ctrl down, no collision. `R` returns to the start point. Mouse wheel zooms (narrows the field of view), middle click resets it. Esc frees the mouse.
 
 The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's default engine wedges the player on the edges of scanned triangle meshes. If the walker is still blocked in every direction it frees itself: a small step up when that clears the obstacle, otherwise back to the last place where walking worked.
 
@@ -152,10 +177,14 @@ The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's defa
 ```
 out/flat/
   project.godot, main.tscn, player/, scripts/
-  assets/scene.splat      Gaussians, Y-up, metres
+  assets/scene.ply        Gaussians with view-dependent colour, Y-up, metres
   assets/collision.glb    collision proxy with vertex colours; also shown behind the splat
   scene.json              manifest the Godot scene is built from; `backdrop` says what fills gaps, `objects` is reserved for interactables
 ```
+
+The splat is exported as a PLY with view-dependent colour. The compact `.splat` format used before holds base colour only; on a 5 minute scan that cost 3.5 dB PSNR against the photos (22.16 to 18.66 dB, measured with `tools/eval_render.py`). The PLY is about 250 bytes per Gaussian, and Godot's first import takes longer (79 s for 900,000 Gaussians).
+
+`tools/eval_render.py <workspace>` renders a finished scan from its training cameras, prints PSNR against the photos with full and with base colour, and writes side-by-side pictures to `<workspace>/eval`.
 
 ## Tests
 

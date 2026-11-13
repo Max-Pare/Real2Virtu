@@ -17,8 +17,7 @@ class FramesCfg:
 class IngestCfg:
     """LiDAR path: a Stray Scanner scan folder replaces the frames and poses stages."""
     scan: str | None = None
-    fps: float = 2.0             # frames kept per second
-    keep_one_in: int = 3         # sharpest of this many candidates is kept
+    fps: float = 2.0             # frames kept per second: the sharpest video frame of each 1/fps s
     long_side: int = 1600        # px; never upscales
     min_move: float = 0.02       # metres; a frame is dropped when the camera moved less
     min_turn_deg: float = 2.0    # ... and turned less than this since the last kept frame
@@ -61,6 +60,10 @@ class SplatCfg:
     depth_weight: float = 0.2  # L1 against sensor depth; only used when the scene has depth maps
     pose_opt: bool = False     # learn a small correction per camera (on for LiDAR poses)
     pose_lr: float = 5e-5
+    # Learn one brightness and colour gain per frame. Phones change exposure and white
+    # balance while filming; without this the changes are baked into the scene as patches.
+    exposure_opt: bool = False  # off: on the first real scan it cost 19% of the kept Gaussians
+    exposure_lr: float = 1e-2
     seed: int = 0
 
 

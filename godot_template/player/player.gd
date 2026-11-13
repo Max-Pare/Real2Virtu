@@ -4,6 +4,7 @@ extends CharacterBody3D
 ## Fly (toggle with F): WASD moves where the camera looks, Space/E up, Q/Ctrl down,
 ##   no gravity, passes through everything.
 ## Shift moves faster in both modes. R returns to the start point.
+## Mouse wheel zooms by narrowing the camera's field of view; middle click resets it.
 ## Esc frees the mouse, click captures it again.
 ##
 ## Scanned collision meshes are rough, so the walker can end up wedged. When it is
@@ -21,11 +22,14 @@ const FLY_SPEED := 3.0
 const FAST_FACTOR := 3.0
 const JUMP_SPEED := 3.5
 const MOUSE_SENS := 0.0025
+const ZOOM_STEP := 0.85       # field of view is multiplied by this per wheel notch
+const MIN_FOV := 5.0          # degrees; the widest is the camera's own setting
 
 @onready var camera: Camera3D = $Camera
 @onready var body_shape: CollisionShape3D = $Collision
 
 var flying := false
+var _base_fov := 75.0
 ## Set to a Vector2 to drive the player from a script instead of the keyboard (automated tests).
 var input_override: Variant = null
 ## How often the walker had to free itself (read by automated tests).
@@ -50,6 +54,7 @@ func _ready() -> void:
 	_bind("toggle_fly", [KEY_F])
 	_bind("respawn", [KEY_R])
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	_base_fov = camera.fov
 
 
 func set_eye_height(h: float) -> void:
@@ -93,8 +98,16 @@ func _bind(action: String, keys: Array) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
-		rotate_y(-event.relative.x * MOUSE_SENS)
-		camera.rotation.x = clamp(camera.rotation.x - event.relative.y * MOUSE_SENS, -1.5, 1.5)
+		# Turn slower when zoomed in, so the picture moves at the same speed on screen.
+		var sens := MOUSE_SENS * camera.fov / _base_fov
+		rotate_y(-event.relative.x * sens)
+		camera.rotation.x = clamp(camera.rotation.x - event.relative.y * sens, -1.5, 1.5)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_UP:
+		camera.fov = clampf(camera.fov * ZOOM_STEP, MIN_FOV, _base_fov)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+		camera.fov = clampf(camera.fov / ZOOM_STEP, MIN_FOV, _base_fov)
+	elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_MIDDLE:
+		camera.fov = _base_fov
 	elif event.is_action_pressed("toggle_fly"):
 		set_flying(not flying)
 	elif event.is_action_pressed("respawn"):

@@ -36,6 +36,40 @@ def write_ply(path: Path, means, scales, quats, opacities, sh0, shN) -> None:
         f.write(data.tobytes())
 
 
+def read_ply(path: Path) -> tuple[list[str], np.ndarray]:
+    """Property names and an [n, properties] float32 table of a PLY written by write_ply."""
+    with open(path, "rb") as f:
+        names, n = [], 0
+        while True:
+            line = f.readline().decode("ascii").strip()
+            if line.startswith("element vertex"):
+                n = int(line.split()[-1])
+            elif line.startswith("property"):
+                kind, name = line.split()[1:]
+                if kind != "float":
+                    raise ValueError(f"{path}: property {name} is {kind}, expected float")
+                names.append(name)
+            elif line == "end_header":
+                break
+        data = np.frombuffer(f.read(), dtype="<f4").reshape(n, len(names)).copy()
+    return names, data
+
+
+def transform_ply(src: Path, dst: Path, scale: float, shift: np.ndarray) -> np.ndarray:
+    """Writes `src` to `dst` with positions x' = scale * (x - shift) and sizes scaled.
+    No rotation, so orientations and view-dependent colour stay valid. Returns positions."""
+    names, data = read_ply(src)
+    xyz = [names.index(k) for k in ("x", "y", "z")]
+    data[:, xyz] = scale * (data[:, xyz] - np.asarray(shift, dtype=np.float32))
+    data[:, [names.index(f"scale_{i}") for i in range(3)]] += np.log(scale)  # stored as logarithms
+    header = "ply\nformat binary_little_endian 1.0\n" + f"element vertex {len(data)}\n"
+    header += "".join(f"property float {name}\n" for name in names) + "end_header\n"
+    with open(dst, "wb") as f:
+        f.write(header.encode("ascii"))
+        f.write(data.astype("<f4").tobytes())
+    return data[:, xyz]
+
+
 def write_splat(path: Path, means, scales, quats, opacities, sh0) -> None:
     """Compact .splat layout: 32 bytes per Gaussian, base colour only.
     position f32x3, scale f32x3, rgba u8x4, rotation u8x4 (wxyz)."""
