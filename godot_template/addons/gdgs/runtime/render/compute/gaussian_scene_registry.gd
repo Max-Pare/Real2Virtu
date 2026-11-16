@@ -34,6 +34,8 @@ var _instance_relight_byte := PackedByteArray()
 # which runs on the rendering thread, only ever uploads bytes.
 var _light_rig_byte := PackedByteArray()
 var _light_count := 0
+# Splat volumes, packed on the main thread by GaussianSplatVolume.pack_all().
+var _volumes_byte := PackedByteArray()
 
 func register_splat_node(node: Node) -> Dictionary:
 	if node == null or _splat_nodes.has(node):
@@ -84,6 +86,17 @@ func get_light_rig_byte() -> PackedByteArray:
 
 func get_light_count() -> int:
 	return _light_count
+
+func get_volumes_byte() -> PackedByteArray:
+	return _volumes_byte
+
+## Main-thread tick from the render manager: parks the packed splat volumes.
+## Returns true when they changed and the renderer needs to re-upload.
+func refresh_volumes(volumes_byte: PackedByteArray) -> bool:
+	if volumes_byte == _volumes_byte:
+		return false
+	_volumes_byte = volumes_byte
+	return true
 
 ## Main-thread tick from the render manager: parks the freshly packed light rig
 ## and re-reads every node's relight knobs. Returns true when the renderer needs

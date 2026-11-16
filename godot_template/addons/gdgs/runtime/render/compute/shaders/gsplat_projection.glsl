@@ -116,6 +116,21 @@ layout (std430, set = 0, binding = 11) restrict readonly buffer InstanceRelightB
 	vec4 instance_relight[];
 };
 
+// --- splat volumes -----------------------------------------------------------
+// Shapes that claim the Gaussians inside them so a node can move, tint and fade
+// them as one object. Packed in world space by
+// runtime/nodes/gaussian_splat_volume.gd; the struct and MAX_VOLUMES must match.
+struct SplatVolume {
+	mat4 world_to_unit; // rest-pose shape -> unit cube / sphere / cylinder
+	mat4 delta;         // rest pose -> current pose, in world space
+	vec4 highlight;     // rgb, strength
+	vec4 params;        // x = shape (0 box, 1 ellipsoid, 2 cylinder), y = opacity
+};
+layout (std430, set = 0, binding = 12) restrict readonly buffer SplatVolumesBuffer {
+	vec4 volume_header; // x = active volume count
+	SplatVolume volumes[];
+};
+
 layout(push_constant) restrict readonly uniform PushConstants {
 	mat4 view_matrix;
 	mat4 projection_matrix;
@@ -286,8 +301,40 @@ void main() {
 	
 	// --- FRUSTUM CULLING ---
 	mat3 object_linear = mat3(model_matrix);
-	mat3 world_covariance = object_linear * DECODE_COVARIANCE(splat.covariance) * transpose(object_linear);
 	vec4 world_pos = model_matrix * vec4(splat.position, 1.0);
+
+	// --- SPLAT VOLUMES ---
+	// The first volume whose rest-pose shape contains the Gaussian's centre
+	// carries it along; `view_rotation` takes the view direction back to the
+	// pose the colours were captured in.
+	vec4 volume_highlight = vec4(0.0);
+	float volume_opacity = 1.0;
+	mat3 view_rotation = mat3(1.0);
+	int volume_count = int(volume_header.x + 0.5);
+	for (int v = 0; v < volume_count; v++) {
+		vec3 u = (volumes[v].world_to_unit * world_pos).xyz;
+		int shape = int(volumes[v].params.x + 0.5);
+		bool inside;
+		if (shape == 1) {
+			inside = dot(u, u) <= 1.0;
+		} else if (shape == 2) {
+			inside = dot(u.xz, u.xz) <= 1.0 && abs(u.y) <= 1.0;
+		} else {
+			inside = all(lessThanEqual(abs(u), vec3(1.0)));
+		}
+		if (inside) {
+			mat3 delta_linear = mat3(volumes[v].delta);
+			world_pos = vec4((volumes[v].delta * world_pos).xyz, 1.0);
+			object_linear = delta_linear * object_linear;
+			view_rotation = transpose(delta_linear);
+			volume_highlight = volumes[v].highlight;
+			volume_opacity = volumes[v].params.y;
+			break;
+		}
+	}
+	if (volume_opacity <= 0.0) return;
+
+	mat3 world_covariance = object_linear * DECODE_COVARIANCE(splat.covariance) * transpose(object_linear);
 	vec4 view_pos = view_matrix * world_pos;
 	vec4 clip_pos = projection_matrix * view_pos;
 	vec2 view_bounds = clip_pos.ww*1.2;
@@ -300,7 +347,7 @@ void main() {
 	float time_factor = ease_out_cubic(clamp(splat_time, 0, 1));
 	float time_factor_late = ease_out_cubic(clamp(splat_time - 0.35, 0, 1));
 
-	float splat_opacity = splat.opacity * time_factor_late*time_factor_late;
+	float splat_opacity = splat.opacity * volume_opacity * time_factor_late*time_factor_late;
 	float splat_scale = mix(2.0, 1.0, time_factor_late);
 
 	const vec3 covariance = project_covariance(world_covariance, splat_scale, view_pos.xyz, dims);
@@ -327,7 +374,7 @@ void main() {
 	uint sort_buffer_offset = buffer_size;
 	vec3 view_dir = normalize(world_pos.xyz - camera_pos);
 
-	vec3 base_color = get_color(view_dir, splat.sh_coefficients);
+	vec3 base_color = get_color(normalize(view_rotation * view_dir), splat.sh_coefficients);
 	vec4 relight = instance_relight[instance_id * 2u];
 	if (relight.w > 0.5) {
 		if (relight.z > 0.5) {
@@ -341,6 +388,8 @@ void main() {
 			relight.x, relight.y, instance_relight[instance_id * 2u + 1u].rgb
 		);
 	}
+
+	base_color = mix(base_color, volume_highlight.rgb, volume_highlight.a);
 
 	RasterizeData data;
 	data.image_pos = image_pos;

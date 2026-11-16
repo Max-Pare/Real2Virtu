@@ -1,5 +1,9 @@
+@tool
 extends Node3D
 ## Builds the level from scene.json, the manifest written by the r2v pipeline.
+##
+## In the editor it shows the splat only, as a preview to place SplatObject
+## nodes against. The preview is not saved with the scene.
 
 const MANIFEST := "res://scene.json"
 
@@ -24,6 +28,8 @@ func _ready() -> void:
 		var c: Array = m["splat"]["center"]
 		SplatLoader.finish_setup(self, splat, Vector3(c[0], c[1], c[2]),
 				_color(backdrop.get("background"), Color.BLACK))
+	if Engine.is_editor_hint():
+		return
 	var floor_y: float = m["collision"].get("floor_y", 0.0)
 	_add_collision(m["collision"]["path"], splat == null, splat != null and backdrop.get("mesh", false))
 	_add_safety_floor(floor_y)
@@ -34,8 +40,6 @@ func _ready() -> void:
 	var p: Array = spawn["position"]
 	player.set_spawn(Vector3(p[0], p[1], p[2]), deg_to_rad(spawn["yaw_deg"]))
 	player.set_eye_height(m.get("eye_height", 1.6))
-
-	# m["objects"] is reserved for interactable objects in a later version.
 
 	# Automated check: R2V_SCREENSHOT=<png path> saves one frame and quits.
 	var shot := OS.get_environment("R2V_SCREENSHOT")

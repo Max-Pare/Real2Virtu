@@ -183,6 +183,25 @@ WASD or arrows to move, mouse to look, Space to jump, Shift to go faster. `F` to
 
 The project uses the Jolt physics engine (bundled with Godot 4.4+). Godot's default engine wedges the player on the edges of scanned triangle meshes. If the walker is still blocked in every direction it frees itself: a small step up when that clears the obstacle, otherwise back to the last place where walking worked.
 
+## Interactive objects
+
+A piece of the scan can glow when the player comes near, and move. Nothing is cut out of the splat file: a `SplatObject` node marks a shape, and every Gaussian whose centre is inside it when the game starts belongs to the object.
+
+1. Open the exported project in the Godot editor and open `main.tscn`. The room is shown as a preview.
+2. Add a `SplatObject` node as a child of `World` and move it onto the object. The Gaussians it holds are tinted.
+3. Fit the shape: drag the dots on its faces, or set `Shape` (box, ellipsoid, cylinder) and `Size` in the inspector. Rotate the node to fit slanted objects.
+4. Set the behaviour in the inspector: `Trigger Distance`, the glow (`Highlight Color`, `Glow Strength`, `Glow Speed`) and `Motion` (bob, wobble or spin).
+
+For your own behaviour, connect the `player_entered` and `player_exited` signals, or move the node from a script or an `AnimationPlayer` with `Motion` set to none: the Gaussians follow the node. `highlight_strength` and `opacity` can be set from scripts too.
+
+- A re-export keeps an existing `main.tscn`; everything else in the project is replaced from the template.
+- The scan has nothing behind an object, so moving it away shows the plain backdrop mesh or a gap. Small movements hide this best.
+- The shape takes whatever is inside it, including bits of floor or wall. Where shapes overlap, the first node in the tree wins.
+- Collision does not follow: the player still collides with the object's scanned position.
+- At most 32 objects. Needs the Compute renderer (the default for these projects).
+
+Verified on one LiDAR room scan (850,000 Gaussians, RX 7800 XT, Godot 4.7.2): tint, movement, fading, the proximity glow and the editor preview with its handles.
+
 ## Output
 
 ```
@@ -190,7 +209,7 @@ out/flat/
   project.godot, main.tscn, player/, scripts/
   assets/scene.ply        Gaussians with view-dependent colour, Y-up, metres
   assets/collision.glb    collision proxy with vertex colours; also shown behind the splat
-  scene.json              manifest the Godot scene is built from; `backdrop` says what fills gaps, `objects` is reserved for interactables
+  scene.json              manifest the Godot scene is built from; `backdrop` says what fills gaps, `objects` is unused
 ```
 
 The splat is exported as a PLY with view-dependent colour. The compact `.splat` format used before holds base colour only; on a 5 minute scan that cost 3.5 dB PSNR against the photos (22.16 to 18.66 dB, measured with `tools/eval_render.py`). The PLY is about 250 bytes per Gaussian, and Godot's first import takes longer (79 s for 900,000 Gaussians).

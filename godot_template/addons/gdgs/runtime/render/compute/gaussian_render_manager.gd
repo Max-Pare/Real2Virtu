@@ -8,6 +8,7 @@ const RendererScript := preload("res://addons/gdgs/runtime/render/compute/gaussi
 # Guarded load, not preload: runtime/lighting/ is deletable and losing it must
 # only cost relighting, leaving splats rendering unlit.
 const LIGHT_RIG_PATH := "res://addons/gdgs/runtime/lighting/gaussian_light_rig.gd"
+const SplatVolumeScript := preload("res://addons/gdgs/runtime/nodes/gaussian_splat_volume.gd")
 
 static var _instance
 
@@ -30,6 +31,8 @@ func _enter_tree() -> void:
 ## piece of relight state is gathered here and parked in the registry as bytes
 ## for the renderer to upload.
 func _process(_delta: float) -> void:
+	if _scene_registry.refresh_volumes(SplatVolumeScript.pack_all().to_byte_array()):
+		_gpu_state_cache.mark_all_render_states_needs_volume_upload(true)
 	var rig := _resolve_light_rig()
 	if rig == null:
 		return

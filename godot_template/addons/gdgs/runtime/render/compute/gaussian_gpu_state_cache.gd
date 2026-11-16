@@ -19,6 +19,10 @@ const LIGHTING_BYTES_PER_SPLAT := 4
 const RELIGHT_FLOATS_PER_INSTANCE := 8
 const MAX_LIGHTS := 8
 const LIGHT_RIG_FLOATS := MAX_LIGHTS * 16
+# Splat volumes: a vec4 header plus fixed slots. Must match
+# gsplat_projection.glsl and runtime/nodes/gaussian_splat_volume.gd.
+const MAX_VOLUMES := 32
+const VOLUME_BUFFER_FLOATS := 4 + MAX_VOLUMES * 40
 
 const SHADER_PATH_PROJECTION := "res://addons/gdgs/runtime/render/compute/shaders/gsplat_projection.glsl"
 const SHADER_PATH_RADIX_UPSWEEP := "res://addons/gdgs/runtime/render/compute/shaders/radix_sort_upsweep.glsl"
@@ -41,6 +45,7 @@ class RenderState:
 	var needs_splat_upload := false
 	var needs_instance_upload := false
 	var needs_relight_upload := false
+	var needs_volume_upload := false
 	var context: GdgsRenderingDeviceContext
 	var shaders: Dictionary = {}
 	var pipelines: Dictionary = {}
@@ -87,6 +92,10 @@ func mark_all_render_states_needs_relight_upload(value: bool) -> void:
 	for state in _render_states.values():
 		state.needs_relight_upload = value
 
+func mark_all_render_states_needs_volume_upload(value: bool) -> void:
+	for state in _render_states.values():
+		state.needs_volume_upload = value
+
 func rebuild_gpu_state(state, point_count: int, unique_data_size: int, instance_count: int) -> void:
 	cleanup_state(state)
 	if point_count <= 0:
@@ -123,6 +132,9 @@ func rebuild_gpu_state(state, point_count: int, unique_data_size: int, instance_
 		LIGHT_RIG_FLOATS * BYTES_PER_FLOAT)
 	state.descriptors["instance_relight"] = state.context.create_storage_buffer(
 		maxi(1, instance_count) * RELIGHT_FLOATS_PER_INSTANCE * BYTES_PER_FLOAT)
+	# Zero-filled until the first upload, which reads as "no volumes".
+	state.descriptors["volumes"] = state.context.create_storage_buffer(
+		VOLUME_BUFFER_FLOATS * BYTES_PER_FLOAT)
 	state.descriptors["culled_splats"] = state.context.create_storage_buffer(point_count * FLOATS_PER_CULLED_SPLAT * BYTES_PER_FLOAT)
 	state.descriptors["grid_dimensions"] = state.context.create_storage_buffer(6 * 4, block_dims.to_byte_array(), RenderingDevice.STORAGE_BUFFER_USAGE_DISPATCH_INDIRECT)
 	state.descriptors["histogram"] = state.context.create_storage_buffer(4 + (1 + 4 * RADIX + num_partitions * RADIX) * 4)
@@ -147,10 +159,11 @@ func rebuild_gpu_state(state, point_count: int, unique_data_size: int, instance_
 		state.descriptors["instance_transforms"],
 		state.descriptors["uniforms"],
 		# Bindings are assigned by position in create_descriptor_set, so these
-		# three must stay last and in this order to match bindings 9/10/11.
+		# four must stay last and in this order to match bindings 9/10/11/12.
 		state.descriptors["light_rig"],
 		state.descriptors["splat_lighting"],
-		state.descriptors["instance_relight"]
+		state.descriptors["instance_relight"],
+		state.descriptors["volumes"]
 	], state.shaders["projection"], 0)
 
 	var radix_upsweep_set: RID = state.context.create_descriptor_set([
@@ -194,6 +207,7 @@ func rebuild_gpu_state(state, point_count: int, unique_data_size: int, instance_
 	state.needs_splat_upload = true
 	state.needs_instance_upload = true
 	state.needs_relight_upload = true
+	state.needs_volume_upload = true
 
 func upload_splats(state, point_data_byte: PackedByteArray, splat_instance_ids_byte: PackedByteArray) -> void:
 	if state.context == null or point_data_byte.is_empty() or splat_instance_ids_byte.is_empty():
@@ -225,6 +239,13 @@ func upload_relight(state, light_rig_byte: PackedByteArray, instance_relight_byt
 		state.context.device.buffer_update(state.descriptors["instance_relight"].rid, 0, instance_relight_byte.size(), instance_relight_byte)
 	state.needs_relight_upload = false
 
+func upload_volumes(state, volumes_byte: PackedByteArray) -> void:
+	if state.context == null:
+		return
+	if volumes_byte.size() == VOLUME_BUFFER_FLOATS * BYTES_PER_FLOAT:
+		state.context.device.buffer_update(state.descriptors["volumes"].rid, 0, volumes_byte.size(), volumes_byte)
+	state.needs_volume_upload = false
+
 func cleanup_state(state) -> void:
 	if state == null:
 		return
@@ -238,6 +259,7 @@ func cleanup_state(state) -> void:
 	state.needs_splat_upload = true
 	state.needs_instance_upload = true
 	state.needs_relight_upload = true
+	state.needs_volume_upload = true
 
 func cleanup_all() -> void:
 	for state in _render_states.values():

@@ -111,7 +111,12 @@ def test_export_writes_godot_project(tmp_path):
     # A post-training floor/scale correction is applied to splat positions, sizes and cameras.
     (ws.dir("collision") / "refine.json").write_text('{"floor_shift": 0.5, "scale": 2.0}')
     before = np.fromfile(ws.dir("splat") / "scene.splat", dtype="<f4").reshape(-1, 8)
+    # main.tscn holds the objects the user placed in the editor; a re-export keeps it.
+    (out / "main.tscn").write_text("edited in Godot")
+    (out / "scripts/world.gd").write_text("stale")
     export.run(ws, cfg)
+    assert (out / "main.tscn").read_text() == "edited in Godot"
+    assert (out / "scripts/world.gd").read_text() != "stale"
     after = np.fromfile(out / "assets/scene.splat", dtype="<f4").reshape(-1, 8)
     assert np.allclose(after[:, :3], 2.0 * (before[:, :3] - [0, 0.5, 0]), atol=1e-5)
     assert np.allclose(after[:, 3:6], 2.0 * before[:, 3:6], rtol=1e-5)

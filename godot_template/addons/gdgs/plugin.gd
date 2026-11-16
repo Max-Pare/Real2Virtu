@@ -9,6 +9,7 @@ const RENDER_BACKEND_SETTING := "gdgs/rendering/backend"
 
 var import_plugin: EditorImportPlugin
 var gizmo_plugin: EditorNode3DGizmoPlugin
+var volume_gizmo_plugin: EditorNode3DGizmoPlugin
 var collision_inspector_plugin: EditorInspectorPlugin
 var lighting_inspector_plugin: EditorInspectorPlugin
 
@@ -20,6 +21,10 @@ func _enter_tree() -> void:
 
 	gizmo_plugin = preload("res://addons/gdgs/editor/gizmos/gaussian_splat_gizmo_plugin.gd").new()
 	add_node_3d_gizmo_plugin(gizmo_plugin)
+
+	volume_gizmo_plugin = preload("res://addons/gdgs/editor/gizmos/gaussian_splat_volume_gizmo_plugin.gd").new()
+	volume_gizmo_plugin.undo_redo = get_undo_redo()
+	add_node_3d_gizmo_plugin(volume_gizmo_plugin)
 
 	print("[gdgs] enable gaussian splatting plugin")
 
@@ -36,6 +41,8 @@ func _exit_tree() -> void:
 		remove_import_plugin(import_plugin)
 	if gizmo_plugin != null:
 		remove_node_3d_gizmo_plugin(gizmo_plugin)
+	if volume_gizmo_plugin != null:
+		remove_node_3d_gizmo_plugin(volume_gizmo_plugin)
 
 	var tree := get_tree()
 	if tree != null and tree.root != null:

@@ -46,6 +46,9 @@ func render_for_compositor(
 			state, scene_registry.get_light_rig_byte(), scene_registry.get_instance_relight_byte()
 		)
 
+	if state.needs_volume_upload:
+		state_cache.upload_volumes(state, scene_registry.get_volumes_byte())
+
 	if state.camera_push_constants.is_empty():
 		return {}
 

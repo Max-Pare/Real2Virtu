@@ -21,7 +21,10 @@ def run(ws: Workspace, cfg: Config) -> None:
     out = Path(c.out)
     if not TEMPLATE.exists():
         raise SystemExit(f"export: template not found at {TEMPLATE}")
-    shutil.copytree(TEMPLATE, out, dirs_exist_ok=True)
+    # main.tscn is where the user places interactive objects in the Godot editor;
+    # a re-export must not replace it.
+    keep = ("main.tscn",) if (out / "main.tscn").exists() else ()
+    shutil.copytree(TEMPLATE, out, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*keep))
 
     assets = out / "assets"
     assets.mkdir(exist_ok=True)
