@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <rect x="64" y="64" width="896" height="896" rx="200" fill="#2B2F2D"/>
+  <!-- room corner, in plan -->
+  <path d="M232 300 V792 H792" fill="none" stroke="#E9ECE8" stroke-width="44" stroke-linecap="square"/>
+  <!-- splat inside the corner -->
+  <ellipse cx="520" cy="520" rx="170" ry="112" transform="rotate(-28 520 520)" fill="#E9ECE8" opacity="0.28"/>
+  <ellipse cx="560" cy="500" rx="96" ry="60" transform="rotate(-28 560 500)" fill="#E9ECE8" opacity="0.5"/>
+  <!-- the tape along the ceiling line -->
+  <rect x="232" y="200" width="560" height="84" fill="#F2C230"/>
+  <g stroke="#2B2F2D" stroke-width="10">
+    <path d="M282 200 v34 M332 200 v34 M382 200 v52 M432 200 v34 M482 200 v34 M532 200 v52 M582 200 v34 M632 200 v34 M682 200 v52 M732 200 v34"/>
+  </g>
+  <rect x="792" y="186" width="30" height="112" fill="#8E948F"/>
+</svg>

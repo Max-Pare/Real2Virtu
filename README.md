@@ -168,6 +168,29 @@ COLMAP has no real-world units. Scale comes from the first of these that is give
 
 Up direction comes from the camera orientations (phones are rarely rolled) and is then sharpened so that floor, table tops and shelves form flat layers. The floor height is first guessed from sparse points and then corrected after training from dense rendered depth, because a cluttered desk has far more feature points than a plain floor.
 
+## Desktop app
+
+`desktop/` holds a desktop front-end (Tauri 2: Rust and a web view). It keeps a list of rooms (one workspace and one Godot project each), edits the build options, runs `.venv` `python -m r2v build`, shows stage progress and the log, and opens the result in Godot. The pipeline stays in Python.
+
+```
+cd desktop
+npm install
+npm run tauri dev        # or: npm run tauri build  (deb, rpm, AppImage; nsis on Windows)
+```
+
+Needs Rust, Node.js and, on Linux, WebKitGTK 4.1. On first start it finds the r2v checkout above the executable or the working directory (`R2V_ROOT` overrides) and adds the workspaces already in it. Settings live in `~/.config/dev.real2virtu.desktop/settings.json`. Each run's log is appended to `<workspace>/desktop.log`. Stop ends the whole process group, COLMAP and ffmpeg included. One build at a time.
+
+`npm run dev` alone opens the interface in a browser with stand-in data, for layout work.
+
+Status, Linux (CachyOS, RX 7800 XT): the app starts; real builds run through the same commands the window calls (an export stage, and a full forced build stopped at the first splat step, with no process left behind). The interface itself was checked in a browser with stand-in data, not clicked through in the app window. Windows: not yet tried.
+
+These runs need a workspace copy that they may overwrite:
+
+```
+cd desktop/src-tauri
+R2V_APP_TEST_WS=workspace_apptest cargo test real_ -- --ignored --test-threads 1
+```
+
 ## Capture tips
 
 - Keep moving; do not pan or tilt while standing still.
