@@ -15,11 +15,19 @@ extends GaussianSplatVolume
 ## as Motion is None (a motion sets the node's transform every frame).
 ##
 ## The scan has nothing behind the object, so moving it far leaves a hole.
+##
+## When the game starts, the part of the collision mesh inside the shape is cut
+## out of the room and handed to this node (see `collision`).
 
 signal player_entered
 signal player_exited
 
 enum Motion { NONE, BOB, WOBBLE, SPIN }
+enum Collision {
+	FOLLOWS,  ## The object's part of the collision mesh moves with it.
+	STAYS,    ## The room keeps blocking where the object was scanned.
+	NONE,     ## The player walks through the object.
+}
 
 @export_group("Near the player")
 ## How close the camera must come to the shape, in metres.
@@ -40,6 +48,17 @@ enum Motion { NONE, BOB, WOBBLE, SPIN }
 ## Bob and wobble cycles per second.
 @export_range(0.05, 10.0, 0.05) var motion_speed := 0.5
 
+@export_group("Collision")
+## What happens to the part of the room's collision mesh inside the shape.
+## Read once, when the game starts.
+@export var collision: Collision = Collision.FOLLOWS
+
+## The body that carries the object's collision, or null (set by the world
+## when the game starts; only with `collision` on Follows).
+var collision_body: AnimatableBody3D
+## The object's part of the plain mesh shown behind the splat, or null.
+var backdrop_mesh: MeshInstance3D
+
 ## True while the camera is within `trigger_distance`.
 var player_near := false
 
@@ -47,7 +66,34 @@ var _near_amount := 0.0  # 0..1, eased, so glow and motion fade in and out
 var _phase := 0.0
 var _spin := 0.0
 
+var _backdrop_visible := true
+
 const FADE_TIME := 0.35
+
+
+## Called by the world when the game starts: takes over this object's part of
+## the room mesh. `faces` holds its triangles, three corners each, in this
+## node's space.
+func adopt_room_piece(piece: MeshInstance3D, faces: PackedVector3Array) -> void:
+	backdrop_mesh = piece
+	add_child(piece)
+	if collision == Collision.FOLLOWS and not faces.is_empty():
+		var shape := ConcavePolygonShape3D.new()
+		shape.set_faces(faces)
+		var holder := CollisionShape3D.new()
+		holder.shape = shape
+		collision_body = AnimatableBody3D.new()
+		collision_body.name = "Collision"
+		# The body follows this node; it is not moved on its own.
+		collision_body.sync_to_physics = false
+		collision_body.add_child(holder)
+		add_child(collision_body)
+
+
+## Whether the plain mesh behind the object is shown at all (the world decides;
+## a fully faded object hides it either way).
+func set_backdrop_visible(value: bool) -> void:
+	_backdrop_visible = value
 
 
 func _process(delta: float) -> void:
@@ -58,6 +104,8 @@ func _process(delta: float) -> void:
 	if near != player_near:
 		player_near = near
 		(player_entered if near else player_exited).emit()
+	if backdrop_mesh != null:
+		backdrop_mesh.visible = _backdrop_visible and opacity > 0.0
 	_near_amount = move_toward(_near_amount, 1.0 if near else 0.0, delta / FADE_TIME)
 	_phase += delta
 

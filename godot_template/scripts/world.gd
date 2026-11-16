@@ -85,17 +85,29 @@ func _add_collision(path: String, show_mesh: bool, as_backdrop: bool) -> void:
 		return
 	var root := packed.instantiate()
 	add_child(root)
+	var objects: Array[SplatObject] = []
+	for node in find_children("*", "", true, false):
+		if node is SplatObject:
+			objects.append(node)
 	for node in root.find_children("*", "MeshInstance3D", true, false):
 		var mesh := node as MeshInstance3D
-		mesh.create_trimesh_collision()
-		mesh.visible = show_mesh or as_backdrop
-		if as_backdrop:
-			# Shown behind the splat in its own colours: gaps in the splat then show
-			# a plain version of the surface instead of the background.
-			var mat := _backdrop_material()
-			mat.vertex_color_use_as_albedo = true
-			mat.vertex_color_is_srgb = true
-			mesh.material_override = mat
+		# Each SplatObject takes its part of the mesh along; the rest stays here.
+		var pieces: Array[MeshInstance3D] = [mesh]
+		if objects.is_empty():
+			mesh.create_trimesh_collision()
+		else:
+			pieces.append_array(CollisionCutout.split(mesh, objects))
+		for piece in pieces:
+			piece.visible = show_mesh or as_backdrop
+			if as_backdrop:
+				# Shown behind the splat in its own colours: gaps in the splat then show
+				# a plain version of the surface instead of the background.
+				var mat := _backdrop_material()
+				mat.vertex_color_use_as_albedo = true
+				mat.vertex_color_is_srgb = true
+				piece.material_override = mat
+		for object in objects:
+			object.set_backdrop_visible(show_mesh or as_backdrop)
 	if show_mesh:
 		# No splat available: light the grey collision mesh so the map is still walkable.
 		var sun := DirectionalLight3D.new()

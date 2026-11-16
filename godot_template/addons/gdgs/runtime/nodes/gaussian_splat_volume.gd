@@ -93,6 +93,25 @@ func get_rest_transform() -> Transform3D:
 	return global_transform
 
 
+## Maps world space onto the unit shape at the rest pose: the box becomes the
+## cube from -1 to 1, the ellipsoid the unit sphere, the cylinder radius 1 and
+## half-height 1. The shader uses the same matrix.
+func get_rest_to_unit() -> Transform3D:
+	return Transform3D(Basis.from_scale(Vector3(2.0, 2.0, 2.0) / size), Vector3.ZERO) \
+			* get_rest_transform().affine_inverse()
+
+
+## Whether a point in unit-shape space is inside. Parity with the volume test
+## in gsplat_projection.glsl.
+static func unit_contains(shape_kind: Shape, u: Vector3) -> bool:
+	match shape_kind:
+		Shape.ELLIPSOID:
+			return u.length_squared() <= 1.0
+		Shape.CYLINDER:
+			return u.x * u.x + u.z * u.z <= 1.0 and absf(u.y) <= 1.0
+	return absf(u.x) <= 1.0 and absf(u.y) <= 1.0 and absf(u.z) <= 1.0
+
+
 ## World-space distance from a point to the volume's surface at its current
 ## pose; 0 inside. Uses the bounding box for every shape.
 func distance_to(point: Vector3) -> float:
@@ -123,11 +142,8 @@ static func pack_all() -> PackedFloat32Array:
 
 
 func _pack(out: PackedFloat32Array, base: int) -> void:
-	var rest := get_rest_transform()
-	var rest_inverse := rest.affine_inverse()
-	# Maps the rest-pose shape onto the unit cube / sphere / cylinder.
-	var to_unit := Transform3D(Basis.from_scale(Vector3(2.0, 2.0, 2.0) / size), Vector3.ZERO) * rest_inverse
-	var delta := global_transform * rest_inverse
+	var to_unit := get_rest_to_unit()
+	var delta := global_transform * get_rest_transform().affine_inverse()
 	_write_transform(out, base, to_unit)
 	_write_transform(out, base + 16, delta)
 

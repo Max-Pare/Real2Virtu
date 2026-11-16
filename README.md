@@ -213,17 +213,19 @@ A piece of the scan can glow when the player comes near, and move. Nothing is cu
 1. Open the exported project in the Godot editor and open `main.tscn`. The room is shown as a preview.
 2. Add a `SplatObject` node as a child of `World` and move it onto the object. The Gaussians it holds are tinted.
 3. Fit the shape: drag the dots on its faces, or set `Shape` (box, ellipsoid, cylinder) and `Size` in the inspector. Rotate the node to fit slanted objects.
-4. Set the behaviour in the inspector: `Trigger Distance`, the glow (`Highlight Color`, `Glow Strength`, `Glow Speed`) and `Motion` (bob, wobble or spin).
+4. Set the behaviour in the inspector: `Trigger Distance`, the glow (`Highlight Color`, `Glow Strength`, `Glow Speed`), `Motion` (bob, wobble or spin) and `Collision`.
+
+When the game starts, the triangles of the collision mesh whose centre is inside the shape are cut out of the room and given to the object. `Collision` says what they do: `Follows` (default) moves them with the object, so the place it left no longer blocks the player; `Stays` leaves the room blocking where the object was scanned; `None` lets the player walk through it. The same triangles are the plain mesh shown behind the splat, and that always moves with the object.
 
 For your own behaviour, connect the `player_entered` and `player_exited` signals, or move the node from a script or an `AnimationPlayer` with `Motion` set to none: the Gaussians follow the node. `highlight_strength` and `opacity` can be set from scripts too.
 
 - A re-export keeps an existing `main.tscn`; everything else in the project is replaced from the template.
-- The scan has nothing behind an object, so moving it away shows the plain backdrop mesh or a gap. Small movements hide this best.
+- The scan has nothing behind an object, so moving or fading it shows a gap with whatever lies beyond. Small movements hide this best.
 - The shape takes whatever is inside it, including bits of floor or wall. Where shapes overlap, the first node in the tree wins.
-- Collision does not follow: the player still collides with the object's scanned position.
+- What happens when a moving object meets the player is untested; expect it not to push the player cleanly.
 - At most 32 objects. Needs the Compute renderer (the default for these projects).
 
-Verified on one LiDAR room scan (850,000 Gaussians, RX 7800 XT, Godot 4.7.2): tint, movement, fading, the proximity glow and the editor preview with its handles.
+Verified on one LiDAR room scan (850,000 Gaussians, RX 7800 XT, Godot 4.7.2): tint, movement, fading, the proximity glow and the editor preview with its handles. Collision checked with ray casts on that scan's mesh (49,999 triangles, 513 inside a 1 m box): in each mode the ray hits or passes at the scanned and at the moved position as described, and no triangle is lost. Not checked: the player walking into a moving object.
 
 ## Output
 
