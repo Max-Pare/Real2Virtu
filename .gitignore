@@ -15,3 +15,5 @@ tools/*
 !tools/check_env.py
 !tools/setup_env.py
 !tools/eval_render.py
+
+*/.claude
